@@ -21,6 +21,8 @@ on:
 
 jobs:
   test:
+    permissions:
+      contents: read
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -45,6 +47,8 @@ jobs:
         with:
           file: ./coverage.txt
   test-win:
+    permissions:
+      contents: read
     runs-on: windows-latest
     strategy:
       fail-fast: false
