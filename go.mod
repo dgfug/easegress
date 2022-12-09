@@ -3,6 +3,8 @@ module github.com/megaease/easegress
 go 1.16
 
 require (
+	cloud.google.com/go/container v1.9.0 // indirect
+	cloud.google.com/go/monitoring v1.9.0 // indirect
 	github.com/ArthurHlt/go-eureka-client v1.1.0
 	github.com/Shopify/sarama v1.29.1
 	github.com/alecthomas/jsonschema v0.0.0-20210526225647-edb03dcab7bc
@@ -19,7 +21,7 @@ require (
 	github.com/gorilla/websocket v1.4.2
 	github.com/hashicorp/consul/api v1.8.1
 	github.com/hashicorp/golang-lru v0.5.4
-	github.com/json-iterator/go v1.1.11
+	github.com/json-iterator/go v1.1.12
 	github.com/klauspost/compress v1.13.1
 	github.com/lucas-clemente/quic-go v0.21.1
 	github.com/megaease/easemesh-api v1.0.0
@@ -47,13 +49,13 @@ require (
 	go.etcd.io/etcd/client/v3 v3.5.0
 	go.etcd.io/etcd/server/v3 v3.5.0
 	go.uber.org/zap v1.17.0
-	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
-	golang.org/x/sys v0.0.0-20210615035016-665e8c7367d1
+	golang.org/x/sync v0.1.0
+	golang.org/x/sys v0.3.0
 	gopkg.in/yaml.v2 v2.4.0
-	k8s.io/api v0.20.7
-	k8s.io/apimachinery v0.20.7
+	k8s.io/api v0.25.5
+	k8s.io/apimachinery v0.25.5
 	k8s.io/cli-runtime v0.20.7 // indirect
-	k8s.io/client-go v0.20.7
+	k8s.io/client-go v0.25.5
 	knative.dev/client v0.23.1
 	knative.dev/serving v0.23.1-0.20210614141420-380a090c2039
 )
