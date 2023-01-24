@@ -11,7 +11,7 @@ require (
 	github.com/facebookgo/freeport v0.0.0-20150612182905-d4adf43b75b9 // indirect
 	github.com/facebookgo/stack v0.0.0-20160209184415-751773369052 // indirect
 	github.com/facebookgo/subset v0.0.0-20200203212716-c811ad88dec4 // indirect
-	github.com/fatih/color v1.9.0
+	github.com/fatih/color v1.14.1
 	github.com/ghodss/yaml v1.0.0
 	github.com/go-chi/chi/v5 v5.0.3
 	github.com/go-zookeeper/zk v1.0.2
@@ -48,7 +48,7 @@ require (
 	go.etcd.io/etcd/server/v3 v3.5.0
 	go.uber.org/zap v1.17.0
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
-	golang.org/x/sys v0.0.0-20210615035016-665e8c7367d1
+	golang.org/x/sys v0.3.0
 	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/api v0.20.7
 	k8s.io/apimachinery v0.20.7
