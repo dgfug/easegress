@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,10 +24,9 @@ import (
 	"sort"
 
 	"github.com/go-chi/chi/v5"
-	yaml "gopkg.in/yaml.v2"
 
-	"github.com/megaease/easegress/pkg/object/httppipeline"
-	"github.com/megaease/easegress/pkg/v"
+	"github.com/megaease/easegress/v2/pkg/filters"
+	"github.com/megaease/easegress/v2/pkg/v"
 )
 
 const (
@@ -37,40 +36,9 @@ const (
 	// ObjectMetadataPrefix is the object metadata prefix.
 	ObjectMetadataPrefix = "/metadata/objects"
 
-	// FilterMetaPrefix is the filter of HTTPPipeline metadata prefix.
-	FilterMetaPrefix = "/metadata/objects/httppipeline/filters"
+	// FilterMetaPrefix is the filter of Pipeline metadata prefix.
+	FilterMetaPrefix = "/metadata/objects/pipeline/filters"
 )
-
-type (
-	// FilterMeta is the metadata of filter.
-	FilterMeta struct {
-		Kind        string
-		Results     []string
-		SpecType    reflect.Type
-		Description string
-	}
-)
-
-var (
-	filterMetaBook = map[string]*FilterMeta{}
-	filterKinds    []string
-)
-
-func (s *Server) initMetadata() {
-	filterRegistry := httppipeline.GetFilterRegistry()
-	for kind, f := range filterRegistry {
-		filterMetaBook[kind] = &FilterMeta{
-			Kind:        kind,
-			Results:     f.Results(),
-			SpecType:    reflect.TypeOf(f.DefaultSpec()),
-			Description: f.Description(),
-		}
-		filterKinds = append(filterKinds, kind)
-		sort.Strings(filterMetaBook[kind].Results)
-	}
-	sort.Strings(filterKinds)
-
-}
 
 func (s *Server) metadataAPIEntries() []*Entry {
 	return []*Entry{
@@ -98,58 +66,53 @@ func (s *Server) metadataAPIEntries() []*Entry {
 }
 
 func (s *Server) listFilters(w http.ResponseWriter, r *http.Request) {
-	buff, err := yaml.Marshal(filterKinds)
-	if err != nil {
-		panic(fmt.Errorf("marshal %#v to yaml failed: %v", filterKinds, err))
-	}
+	var kinds []string
+	filters.WalkKind(func(k *filters.Kind) bool {
+		kinds = append(kinds, k.Name)
+		return true
+	})
+	sort.Strings(kinds)
 
-	w.Header().Set("Content-Type", "text/vnd.yaml")
-	w.Write(buff)
+	WriteBody(w, r, kinds)
 }
 
 func (s *Server) getFilterDescription(w http.ResponseWriter, r *http.Request) {
 	kind := chi.URLParam(r, "kind")
 
-	fm, exits := filterMetaBook[kind]
-	if !exits {
+	k := filters.GetKind(kind)
+	if k == nil {
 		HandleAPIError(w, r, http.StatusNotFound, fmt.Errorf("not found"))
 		return
 	}
-	w.Write([]byte(fm.Description))
+	w.Write([]byte(k.Description))
 }
 
 func (s *Server) getFilterSchema(w http.ResponseWriter, r *http.Request) {
 	kind := chi.URLParam(r, "kind")
 
-	fm, exits := filterMetaBook[kind]
-	if !exits {
+	k := filters.GetKind(kind)
+	if k == nil {
 		HandleAPIError(w, r, http.StatusNotFound, fmt.Errorf("not found"))
 		return
 	}
+	specType := reflect.TypeOf(k.DefaultSpec())
 
-	buff, err := v.GetSchemaInYAML(fm.SpecType)
+	schema, err := v.GetSchema(specType)
 	if err != nil {
-		panic(fmt.Errorf("get schema for %v failed: %v", fm.Kind, err))
+		panic(fmt.Errorf("get schema for %v failed: %v", kind, err))
 	}
 
-	w.Header().Set("Content-Type", "text/vnd.yaml")
-	w.Write(buff)
+	WriteBody(w, r, schema)
 }
 
 func (s *Server) getFilterResults(w http.ResponseWriter, r *http.Request) {
 	kind := chi.URLParam(r, "kind")
 
-	fm, exits := filterMetaBook[kind]
-	if !exits {
+	k := filters.GetKind(kind)
+	if k == nil {
 		HandleAPIError(w, r, http.StatusNotFound, fmt.Errorf("not found"))
 		return
 	}
 
-	buff, err := yaml.Marshal(fm.Results)
-	if err != nil {
-		panic(fmt.Errorf("marshal %#v to yaml failed: %v", fm.Results, err))
-	}
-
-	w.Header().Set("Content-Type", "text/vnd.yaml")
-	w.Write(buff)
+	WriteBody(w, r, k.Results)
 }

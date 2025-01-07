@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,7 +24,7 @@ import (
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/megaease/easegress/pkg/logger"
+	"github.com/megaease/easegress/v2/pkg/logger"
 )
 
 type (
@@ -211,6 +211,58 @@ func (w *watcher) WatchRawPrefix(prefix string) (<-chan map[string]*clientv3.Eve
 					default:
 						logger.Errorf("BUG: prefix %s received unknown event type %v",
 							prefix, event.Type)
+					}
+				}
+			}
+		}
+	}()
+
+	return prefixChan, nil
+}
+
+func (w *watcher) WatchWithOp(key string, ops ...ClientOp) (<-chan map[string]*string, error) {
+	newOps := []clientv3.OpOption{}
+	for _, o := range ops {
+		if opOption := getOpOption(o); opOption != nil {
+			newOps = append(newOps, opOption)
+		}
+	}
+
+	// NOTE: Can't use Context with timeout here.
+	ctx, cancel := context.WithCancel(context.Background())
+	watchResp := w.w.Watch(ctx, key, newOps...)
+	prefixChan := make(chan map[string]*string, 10)
+
+	go func() {
+		defer cancel()
+		defer close(prefixChan)
+
+		for {
+			select {
+			case <-w.done:
+				return
+			case resp := <-watchResp:
+				if resp.Canceled {
+					logger.Errorf("watch %s with ops %v canceled: %v", key, ops, resp.Err())
+					return
+				}
+				if resp.IsProgressNotify() {
+					continue
+				}
+				for _, event := range resp.Events {
+					switch event.Type {
+					case mvccpb.PUT:
+						value := string(event.Kv.Value)
+						prefixChan <- map[string]*string{
+							string(event.Kv.Key): &value,
+						}
+					case mvccpb.DELETE:
+						prefixChan <- map[string]*string{
+							string(event.Kv.Key): nil,
+						}
+					default:
+						logger.Errorf("BUG: key %s with ops %v received unknown event type %v",
+							key, ops, event.Type)
 					}
 				}
 			}

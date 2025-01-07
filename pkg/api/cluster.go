@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,9 +22,9 @@ import (
 	"strconv"
 	"strings"
 
-	yaml "gopkg.in/yaml.v2"
-
-	"github.com/megaease/easegress/pkg/supervisor"
+	"github.com/megaease/easegress/v2/pkg/cluster"
+	"github.com/megaease/easegress/v2/pkg/supervisor"
+	"github.com/megaease/easegress/v2/pkg/util/codectool"
 )
 
 func (s *Server) _purgeMember(memberName string) {
@@ -77,7 +77,7 @@ func (s *Server) _getObject(name string) *supervisor.Spec {
 
 	spec, err := s.super.NewSpec(*value)
 	if err != nil {
-		panic(fmt.Errorf("bad spec(err: %v) from yaml: %s", err, *value))
+		panic(fmt.Errorf("bad spec(err: %v) from json: %s", err, *value))
 	}
 
 	return spec
@@ -93,7 +93,7 @@ func (s *Server) _listObjects() []*supervisor.Spec {
 	for _, v := range kvs {
 		spec, err := s.super.NewSpec(v)
 		if err != nil {
-			panic(fmt.Errorf("bad spec(err: %v) from yaml: %s", err, v))
+			panic(fmt.Errorf("bad spec(err: %v) from json: %s", err, v))
 		}
 		specs = append(specs, spec)
 	}
@@ -103,7 +103,7 @@ func (s *Server) _listObjects() []*supervisor.Spec {
 
 func (s *Server) _putObject(spec *supervisor.Spec) {
 	err := s.cluster.Put(s.cluster.Layout().ConfigObjectKey(spec.Name()),
-		spec.YAMLConfig())
+		spec.JSONConfig())
 	if err != nil {
 		ClusterPanic(err)
 	}
@@ -116,50 +116,58 @@ func (s *Server) _deleteObject(name string) {
 	}
 }
 
-func (s *Server) _getStatusObject(name string) map[string]string {
-	prefix := s.cluster.Layout().StatusObjectPrefix(name)
+// _getStatusObject returns the status object with the specified name.
+// in easegress, since TrafficController contain multiply namespaces.
+// and it use special prefix to store status of httpserver, pipeline, or grpcserver.
+// so we need to diff them by using isTraffic. previous, we actually can't get status for business controller like autocertmanager.
+func (s *Server) _getStatusObject(namespace string, name string, isTraffic bool) map[string]interface{} {
+	ns := namespace
+	if ns == "" {
+		ns = cluster.NamespaceDefault
+	}
+	prefix := s.cluster.Layout().StatusObjectPrefix(ns, name)
+	if isTraffic {
+		prefix = s.cluster.Layout().StatusObjectPrefix(cluster.TrafficNamespace(ns), name)
+	}
 	kvs, err := s.cluster.GetPrefix(prefix)
 	if err != nil {
 		ClusterPanic(err)
 	}
 
-	status := make(map[string]string)
+	status := make(map[string]interface{})
 	for k, v := range kvs {
-		// NOTE: Here omitting the step yaml.Unmarshal in _listStatusObjects.
-		status[strings.TrimPrefix(k, prefix)] = v
+		k = strings.TrimPrefix(k, s.cluster.Layout().StatusObjectsPrefix())
+
+		// NOTE: This needs top-level of the status to be a map.
+		m := map[string]interface{}{}
+		err = codectool.Unmarshal([]byte(v), &m)
+		if err != nil {
+			ClusterPanic(fmt.Errorf("unmarshal %s to json failed: %v", v, err))
+		}
+		status[k] = m
 	}
 
 	return status
 }
 
-func (s *Server) _listStatusObjects() map[string]map[string]interface{} {
+func (s *Server) _listStatusObjects() map[string]interface{} {
 	prefix := s.cluster.Layout().StatusObjectsPrefix()
 	kvs, err := s.cluster.GetPrefix(prefix)
 	if err != nil {
 		ClusterPanic(err)
 	}
 
-	status := make(map[string]map[string]interface{})
+	status := make(map[string]interface{})
 	for k, v := range kvs {
 		k = strings.TrimPrefix(k, prefix)
 
-		om := strings.Split(k, "/")
-		if len(om) != 2 {
-			ClusterPanic(fmt.Errorf("the key %s can't be split into two fields by /", k))
-		}
-		objectName, memberName := om[0], om[1]
-		_, exists := status[objectName]
-		if !exists {
-			status[objectName] = make(map[string]interface{})
-		}
-
 		// NOTE: This needs top-level of the status to be a map.
-		i := map[string]interface{}{}
-		err = yaml.Unmarshal([]byte(v), &i)
+		m := map[string]interface{}{}
+		err = codectool.Unmarshal([]byte(v), &m)
 		if err != nil {
-			ClusterPanic(fmt.Errorf("unmarshal %s to yaml failed: %v", v, err))
+			ClusterPanic(fmt.Errorf("unmarshal %s to json failed: %v", v, err))
 		}
-		status[objectName][memberName] = i
+		status[k] = m
 	}
 
 	return status

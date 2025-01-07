@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,19 +15,20 @@
  * limitations under the License.
  */
 
+// Package label defines labels.
 package label
 
 const (
 	// KeyRole is the key of role
 	KeyRole = "mesh-role"
 	// KeyServiceName is the key of service name
-	KeyServiceName = "mesh-servicename"
-	// KeyServiceLables is the key of service label
-	KeyServiceLables = "mesh-service-labels"
+	KeyServiceName = "mesh-service-name"
+	// KeyServiceLabels is the key of service label
+	KeyServiceLabels = "mesh-service-labels"
 	// KeyApplicationPort is the key of application port
-	KeyApplicationPort = "application-port"
+	KeyApplicationPort = "mesh-application-port"
 	// KeyAliveProbe is the key of keepalive probe
-	KeyAliveProbe = "alive-probe"
+	KeyAliveProbe = "mesh-alive-probe"
 
 	// ValueRoleMaster is the name of master
 	ValueRoleMaster = "master"

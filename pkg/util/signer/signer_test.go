@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,7 +19,6 @@ package signer
 
 import (
 	"io"
-	"io/ioutil"
 	"net/http"
 	"strconv"
 	"strings"
@@ -94,8 +93,7 @@ var awsSpec = &Spec{
 }
 
 func buildRequest(serviceName, region, payload string) *http.Request {
-	var body io.Reader
-	body = strings.NewReader(payload)
+	var body io.Reader = strings.NewReader(payload)
 
 	var bodyLen int
 
@@ -160,7 +158,7 @@ func TestSignRequest(t *testing.T) {
 	expectedSig := "AWS4-HMAC-SHA256 Credential=AKID/19700101/us-east-1/dynamodb/aws4_request, SignedHeaders=content-length;content-type;host;x-amz-date;x-amz-meta-other-header;x-amz-meta-other-header_with_underscore;x-amz-security-token;x-amz-target, Signature=a518299330494908a70222cec6899f6f32f297f8595f6df1776d998936652ad9"
 
 	signer := CreateFromSpec(awsSpec)
-	signer.NewContext(epochTime(), "us-east-1", "dynamodb").Sign(req)
+	signer.NewSigningContext(epochTime(), "us-east-1", "dynamodb").Sign(req, nil)
 
 	q := req.Header
 	if e, a := expectedSig, q.Get("Authorization"); e != a {
@@ -170,7 +168,7 @@ func TestSignRequest(t *testing.T) {
 		t.Errorf("\nexpect: %v\nactual: %v\n", e, a)
 	}
 
-	if e := signer.Verify(req); e != nil {
+	if e := signer.NewVerificationContext().Verify(req, nil); e != nil {
 		t.Errorf("signature verification failed: %v", e.Error())
 	}
 }
@@ -179,7 +177,7 @@ func TestPresignRequest(t *testing.T) {
 	req := buildRequest("dynamodb", "us-east-1", "{}")
 
 	signer := CreateFromSpec(awsSpec)
-	signer.NewContext(epochTime(), "us-east-1", "dynamodb").Presign(req, 300*time.Second)
+	signer.NewSigningContext(epochTime(), "us-east-1", "dynamodb").Presign(req, 300*time.Second)
 
 	expectedDate := "19700101T000000Z"
 	expectedHeaders := "content-length;content-type;host;x-amz-meta-other-header;x-amz-meta-other-header_with_underscore"
@@ -213,7 +211,7 @@ func TestPresignBodyWithArrayRequest(t *testing.T) {
 	req.URL.RawQuery = "Foo=z&Foo=o&Foo=m&Foo=a"
 
 	signer := CreateFromSpec(awsSpec)
-	signer.NewContext(epochTime(), "us-east-1", "dynamodb").Presign(req, 300*time.Second)
+	signer.NewSigningContext(epochTime(), "us-east-1", "dynamodb").Presign(req, 300*time.Second)
 
 	expectedDate := "19700101T000000Z"
 	expectedHeaders := "content-length;content-type;host;x-amz-meta-other-header;x-amz-meta-other-header_with_underscore"
@@ -246,14 +244,14 @@ func TestPresign_UnsignedPayload(t *testing.T) {
 	req := buildRequest("service-name", "us-east-1", "hello")
 
 	signer := CreateFromSpec(awsSpec).ExcludeBody(true)
-	signer.NewContext(time.Now(), "us-east-1", "service-name").Presign(req, 5*time.Minute)
+	signer.NewSigningContext(time.Now(), "us-east-1", "service-name").Presign(req, 5*time.Minute)
 
 	hash := req.Header.Get("X-Amz-Content-Sha256")
 	if e, a := "UNSIGNED-PAYLOAD", hash; e != a {
 		t.Errorf("\nexpect: %v\nactual: %v\n", e, a)
 	}
 
-	if e := signer.Verify(req); e != nil {
+	if e := signer.NewVerificationContext().Verify(req, nil); e != nil {
 		t.Errorf("signature verification failed: %v", e.Error())
 	}
 }
@@ -263,7 +261,7 @@ func TestSignPrecomputedBodyChecksum(t *testing.T) {
 	req.Header.Set("X-Amz-Content-Sha256", "PRECOMPUTED")
 
 	signer := CreateFromSpec(awsSpec)
-	signer.NewContext(time.Now(), "us-east-1", "dynamodb").Sign(req)
+	signer.NewSigningContext(time.Now(), "us-east-1", "dynamodb").Sign(req, nil)
 
 	hash := req.Header.Get("X-Amz-Content-Sha256")
 	if e, a := "PRECOMPUTED", hash; e != a {
@@ -275,20 +273,20 @@ func TestSignVerify(t *testing.T) {
 	req := buildRequest("dynamodb", "us-east-1", "{}")
 
 	signer := CreateFromSpec(awsSpec)
-	signer.NewContext(time.Now().Add(-16*time.Minute), "us-east-1", "dynamodb").Sign(req)
+	signer.NewSigningContext(time.Now().Add(-16*time.Minute), "us-east-1", "dynamodb").Sign(req, nil)
 
-	if e := signer.Verify(req); e != nil {
+	if e := signer.NewVerificationContext().Verify(req, nil); e != nil {
 		t.Errorf("verification failed: %s", e.Error())
 	}
 
 	signer.SetTTL(15 * time.Minute)
-	if e := signer.Verify(req); e == nil {
+	if e := signer.NewVerificationContext().Verify(req, nil); e == nil {
 		t.Errorf("verification should failed, but didn't")
 	}
 
 	signer.SetTTL(0)
 	req.Header.Set("X-Amz-Security-Token", "SESSION1")
-	if e := signer.Verify(req); e == nil {
+	if e := signer.NewVerificationContext().Verify(req, nil); e == nil {
 		t.Errorf("verification should failed, but didn't")
 	}
 }
@@ -297,26 +295,26 @@ func TestPresignVerify(t *testing.T) {
 	signer := CreateFromSpec(awsSpec)
 
 	req := buildRequest("dynamodb", "us-east-1", "{}")
-	ctx := signer.NewContext(time.Now().Add(-16*time.Minute), "us-east-1", "dynamodb")
+	ctx := signer.NewSigningContext(time.Now().Add(-16*time.Minute), "us-east-1", "dynamodb")
 
 	ctx.Presign(req, 10*time.Minute)
-	if e := signer.Verify(req); e == nil {
+	if e := signer.NewVerificationContext().Verify(req, nil); e == nil {
 		t.Errorf("verification should failed, but didn't")
 	}
 
 	ctx.Presign(req, 20*time.Minute)
-	if e := signer.Verify(req); e != nil {
+	if e := signer.NewVerificationContext().Verify(req, nil); e != nil {
 		t.Errorf("verification failed: %s", e.Error())
 	}
 
 	signer.SetTTL(15 * time.Minute)
-	if e := signer.Verify(req); e == nil {
+	if e := signer.NewVerificationContext().Verify(req, nil); e == nil {
 		t.Errorf("verification should failed, but didn't")
 	}
 
 	signer.SetTTL(0)
-	req.Body = ioutil.NopCloser(strings.NewReader("aaaaa"))
-	if e := signer.Verify(req); e == nil {
+	req.Body = io.NopCloser(strings.NewReader("aaaaa"))
+	if e := signer.NewVerificationContext().Verify(req, nil); e == nil {
 		t.Errorf("verification should failed, but didn't")
 	}
 }
@@ -326,7 +324,7 @@ func BenchmarkPresignRequest(b *testing.B) {
 
 	signer := CreateFromSpec(awsSpec)
 	for i := 0; i < b.N; i++ {
-		signer.NewContext(time.Now(), "us-east-1", "dynamodb").Presign(req, 300*time.Second)
+		signer.NewSigningContext(time.Now(), "us-east-1", "dynamodb").Presign(req, 300*time.Second)
 	}
 }
 
@@ -335,7 +333,7 @@ func BenchmarkSignRequest(b *testing.B) {
 
 	signer := CreateFromSpec(awsSpec)
 	for i := 0; i < b.N; i++ {
-		signer.NewContext(time.Now(), "us-east-1", "dynamodb").Sign(req)
+		signer.NewSigningContext(time.Now(), "us-east-1", "dynamodb").Sign(req, nil)
 	}
 }
 
@@ -343,9 +341,9 @@ func BenchmarkVerify(b *testing.B) {
 	req := buildRequest("dynamodb", "us-east-1", "{}")
 
 	signer := CreateFromSpec(awsSpec)
-	signer.NewContext(time.Now(), "us-east-1", "dynamodb").Sign(req)
+	signer.NewSigningContext(time.Now(), "us-east-1", "dynamodb").Sign(req, nil)
 
 	for i := 0; i < b.N; i++ {
-		signer.Verify(req)
+		signer.NewVerificationContext().Verify(req, nil)
 	}
 }

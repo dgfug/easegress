@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -21,16 +21,16 @@ import (
 	"fmt"
 	"sync"
 
-	"gopkg.in/yaml.v2"
-
-	"github.com/megaease/easegress/pkg/filter/proxy"
-	"github.com/megaease/easegress/pkg/filter/requestadaptor"
-	"github.com/megaease/easegress/pkg/logger"
-	"github.com/megaease/easegress/pkg/object/function/spec"
-	"github.com/megaease/easegress/pkg/object/httppipeline"
-	"github.com/megaease/easegress/pkg/object/httpserver"
-	"github.com/megaease/easegress/pkg/object/trafficcontroller"
-	"github.com/megaease/easegress/pkg/supervisor"
+	"github.com/megaease/easegress/v2/pkg/filters/builder"
+	proxy "github.com/megaease/easegress/v2/pkg/filters/proxies/httpproxy"
+	"github.com/megaease/easegress/v2/pkg/logger"
+	"github.com/megaease/easegress/v2/pkg/object/function/spec"
+	"github.com/megaease/easegress/v2/pkg/object/httpserver"
+	"github.com/megaease/easegress/v2/pkg/object/httpserver/routers"
+	"github.com/megaease/easegress/v2/pkg/object/pipeline"
+	"github.com/megaease/easegress/v2/pkg/object/trafficcontroller"
+	"github.com/megaease/easegress/v2/pkg/supervisor"
+	"github.com/megaease/easegress/v2/pkg/util/codectool"
 )
 
 const ingressFunctionKey = "X-FaaS-Func-Name"
@@ -54,15 +54,15 @@ type (
 	}
 
 	pipelineSpecBuilder struct {
-		Kind              string `yaml:"kind"`
-		Name              string `yaml:"name"`
-		httppipeline.Spec `yaml:",inline"`
+		Kind          string `json:"kind"`
+		Name          string `json:"name"`
+		pipeline.Spec `json:",inline"`
 	}
 
 	httpServerSpecBuilder struct {
-		Kind            string `yaml:"kind"`
-		Name            string `yaml:"name"`
-		httpserver.Spec `yaml:",inline"`
+		Kind            string `json:"kind"`
+		Name            string `json:"name"`
+		httpserver.Spec `json:",inline"`
 	}
 )
 
@@ -90,9 +90,9 @@ func newIngressServer(superSpec *supervisor.Spec, controllerName string) *ingres
 
 func newPipelineSpecBuilder(funcName string) *pipelineSpecBuilder {
 	return &pipelineSpecBuilder{
-		Kind: httppipeline.Kind,
+		Kind: pipeline.Kind,
 		Name: funcName,
-		Spec: httppipeline.Spec{},
+		Spec: pipeline.Spec{},
 	}
 }
 
@@ -116,28 +116,28 @@ func (b *httpServerSpecBuilder) buildWithRules(spec *httpserver.Spec) *httpServe
 	return b
 }
 
-func (b *httpServerSpecBuilder) yamlConfig() string {
-	buff, err := yaml.Marshal(b)
+func (b *httpServerSpecBuilder) jsonConfig() string {
+	buff, err := codectool.MarshalJSON(b)
 	if err != nil {
-		logger.Errorf("BUG: marshal %#v to yaml failed: %v", b, err)
+		logger.Errorf("BUG: marshal %#v to json failed: %v", b, err)
 	}
 	return string(buff)
 }
 
-func (b *pipelineSpecBuilder) yamlConfig() string {
-	buff, err := yaml.Marshal(b)
+func (b *pipelineSpecBuilder) jsonConfig() string {
+	buff, err := codectool.MarshalJSON(b)
 	if err != nil {
-		logger.Errorf("BUG: marshal %#v to yaml failed: %v", b, err)
+		logger.Errorf("BUG: marshal %#v to json failed: %v", b, err)
 	}
 	return string(buff)
 }
 
 func (b *pipelineSpecBuilder) appendReqAdaptor(funcSpec *spec.Spec, faasNamespace, faasHostSuffix string) *pipelineSpecBuilder {
 	adaptorName := "requestAdaptor"
-	b.Flow = append(b.Flow, httppipeline.Flow{Filter: adaptorName})
+	b.Flow = append(b.Flow, pipeline.FlowNode{FilterName: adaptorName})
 
 	b.Filters = append(b.Filters, map[string]interface{}{
-		"kind":   requestadaptor.Kind,
+		"kind":   builder.RequestAdaptorKind,
 		"name":   adaptorName,
 		"method": funcSpec.RequestAdaptor.Method,
 		"path":   funcSpec.RequestAdaptor.Path,
@@ -153,23 +153,24 @@ func (b *pipelineSpecBuilder) appendReqAdaptor(funcSpec *spec.Spec, faasNamespac
 func (b *pipelineSpecBuilder) appendProxy(faasNetworkLayerURL string) *pipelineSpecBuilder {
 	mainServers := []*proxy.Server{
 		{
-			URL: faasNetworkLayerURL,
+			URL:      faasNetworkLayerURL,
+			KeepHost: true, // Keep the host of the requests as they route to functions.
 		},
 	}
 
 	backendName := "faasBackend"
 
-	lb := &proxy.LoadBalance{
-		Policy: proxy.PolicyRoundRobin,
-	}
+	lb := &proxy.LoadBalanceSpec{}
 
-	b.Flow = append(b.Flow, httppipeline.Flow{Filter: backendName})
+	b.Flow = append(b.Flow, pipeline.FlowNode{FilterName: backendName})
 	b.Filters = append(b.Filters, map[string]interface{}{
 		"kind": proxy.Kind,
 		"name": backendName,
-		"mainPool": &proxy.PoolSpec{
-			Servers:     mainServers,
-			LoadBalance: lb,
+		"mainPool": &proxy.ServerPoolSpec{
+			BaseServerPoolSpec: proxy.BaseServerPoolSpec{
+				Servers:     mainServers,
+				LoadBalance: lb,
+			},
 		},
 	})
 
@@ -192,14 +193,14 @@ func (ings *ingressServer) Init() error {
 
 	builder := newHTTPServerSpecBuilder(ings.superSpec.Name())
 	builder.buildWithOutRules(spec.HTTPServer)
-	superSpec, err := supervisor.NewSpec(builder.yamlConfig())
+	superSpec, err := supervisor.NewSpec(builder.jsonConfig())
 	if err != nil {
-		logger.Errorf("new spec for %s failed: %v", builder.yamlConfig(), err)
+		logger.Errorf("new spec for %s failed: %v", builder.jsonConfig(), err)
 		return err
 	}
 
 	ings.httpServerSpec = superSpec
-	entity, err := ings.tc.CreateHTTPServerForSpec(ings.namespace, superSpec)
+	entity, err := ings.tc.CreateTrafficGateForSpec(ings.namespace, superSpec)
 	if err != nil {
 		return fmt.Errorf("create http server %s failed: %v", superSpec.Name(), err)
 	}
@@ -212,11 +213,11 @@ func (ings *ingressServer) updateHTTPServer(spec *httpserver.Spec) error {
 	builder.buildWithRules(spec)
 
 	var err error
-	ings.httpServerSpec, err = supervisor.NewSpec(builder.yamlConfig())
+	ings.httpServerSpec, err = supervisor.NewSpec(builder.jsonConfig())
 	if err != nil {
-		return fmt.Errorf("BUG: new spec: %s failed: %v", builder.yamlConfig(), err)
+		return fmt.Errorf("BUG: new spec: %s failed: %v", builder.jsonConfig(), err)
 	}
-	_, err = ings.tc.ApplyHTTPServerForSpec(ings.namespace, ings.httpServerSpec)
+	_, err = ings.tc.ApplyTrafficGateForSpec(ings.namespace, ings.httpServerSpec)
 	if err != nil {
 		return fmt.Errorf("apply http server %s failed: %v", ings.httpServerSpec.Name(), err)
 	}
@@ -242,15 +243,14 @@ func (ings *ingressServer) add(pipeline string) error {
 	index := ings.find(pipeline)
 	// not backend as function's pipeline
 	if index == -1 {
-		rule := &httpserver.Rule{
-			Paths: []*httpserver.Path{
+		rule := &routers.Rule{
+			Paths: []*routers.Path{
 				{
 					PathPrefix: "/",
-					Headers: []*httpserver.Header{
+					Headers: []*routers.Header{
 						{
-							Key:     ingressFunctionKey,
-							Values:  []string{pipeline},
-							Backend: pipeline,
+							Key:    ingressFunctionKey,
+							Values: []string{pipeline},
 						},
 					},
 					Backend: pipeline,
@@ -282,13 +282,13 @@ func (ings *ingressServer) Put(funcSpec *spec.Spec) error {
 	builder.appendReqAdaptor(funcSpec, ings.faasNamespace, ings.faasHostSuffix)
 	builder.appendProxy(ings.faasNetworkLayerURL)
 
-	yamlConfig := builder.yamlConfig()
-	superSpec, err := supervisor.NewSpec(yamlConfig)
+	jsonConfig := builder.jsonConfig()
+	superSpec, err := supervisor.NewSpec(jsonConfig)
 	if err != nil {
-		logger.Errorf("new spec for %s failed: %v", yamlConfig, err)
+		logger.Errorf("new spec for %s failed: %v", jsonConfig, err)
 		return err
 	}
-	if _, err = ings.tc.CreateHTTPPipelineForSpec(ings.namespace, superSpec); err != nil {
+	if _, err = ings.tc.CreatePipelineForSpec(ings.namespace, superSpec); err != nil {
 		return fmt.Errorf("create http pipeline %s failed: %v", superSpec.Name(), err)
 	}
 	ings.add(funcSpec.Name)
@@ -360,8 +360,8 @@ func (ings *ingressServer) Close() {
 	ings.mutex.Lock()
 	defer ings.mutex.Unlock()
 
-	ings.tc.DeleteHTTPServer(ings.namespace, ings.httpServer.Spec().Name())
+	ings.tc.DeleteTrafficGate(ings.namespace, ings.httpServer.Spec().Name())
 	for name := range ings.pipelines {
-		ings.tc.DeleteHTTPPipeline(ings.namespace, name)
+		ings.tc.DeletePipeline(ings.namespace, name)
 	}
 }

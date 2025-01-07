@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,6 +19,7 @@ package cluster
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"go.etcd.io/etcd/client/v3/concurrency"
@@ -31,20 +32,35 @@ type Mutex interface {
 }
 
 type mutex struct {
+	// concurrency.Mutex is a session level mutex, so sync.Mutex is
+	// required to make it goroutine safe
+	lock    sync.Mutex
 	m       *concurrency.Mutex
 	timeout time.Duration
 }
 
-func (m *mutex) Lock() error {
+func (m *mutex) Lock() (err error) {
+	panicked := true
+
+	m.lock.Lock()
+	defer func() {
+		if panicked || err != nil {
+			m.lock.Unlock()
+		}
+	}()
+
 	ctx, cancel := context.WithTimeout(context.Background(), m.timeout)
 	defer cancel()
 
-	return m.m.Lock(ctx)
+	err = m.m.Lock(ctx)
+	panicked = false
+	return
 }
 
 func (m *mutex) Unlock() error {
 	ctx, cancel := context.WithTimeout(context.Background(), m.timeout)
 	defer cancel()
+	defer m.lock.Unlock()
 
 	return m.m.Unlock(ctx)
 }

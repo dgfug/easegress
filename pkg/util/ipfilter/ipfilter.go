@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 
+// Package ipfilter provides IPFilter.
 package ipfilter
 
 import (
@@ -23,8 +24,7 @@ import (
 
 	"github.com/yl2chen/cidranger"
 
-	"github.com/megaease/easegress/pkg/context"
-	"github.com/megaease/easegress/pkg/logger"
+	"github.com/megaease/easegress/v2/pkg/logger"
 )
 
 var (
@@ -35,10 +35,10 @@ var (
 type (
 	// Spec describes IPFilter.
 	Spec struct {
-		BlockByDefault bool `yaml:"blockByDefault" jsonschema:"required"`
+		BlockByDefault bool `json:"blockByDefault,omitempty"`
 
-		AllowIPs []string `yaml:"allowIPs" jsonschema:"omitempty,uniqueItems=true,format=ipcidr-array"`
-		BlockIPs []string `yaml:"blockIPs" jsonschema:"omitempty,uniqueItems=true,format=ipcidr-array"`
+		AllowIPs []string `json:"allowIPs,omitempty" jsonschema:"uniqueItems=true,format=ipcidr-array"`
+		BlockIPs []string `json:"blockIPs,omitempty" jsonschema:"uniqueItems=true,format=ipcidr-array"`
 	}
 
 	// IPFilter is the IP filter.
@@ -57,6 +57,10 @@ type (
 
 // New creates an IPFilter.
 func New(spec *Spec) *IPFilter {
+	if spec == nil {
+		return nil
+	}
+
 	rangerFromIPCIDRs := func(ipcidrs []string) cidranger.Ranger {
 		ranger := cidranger.NewPCTrieRanger()
 		for _, ipcidr := range ipcidrs {
@@ -91,13 +95,12 @@ func New(spec *Spec) *IPFilter {
 	}
 }
 
-// AllowHTTPContext is the wrapper of Allow for HTTPContext.
-func (f *IPFilter) AllowHTTPContext(ctx context.HTTPContext) bool {
-	return f.Allow(ctx.Request().RealIP())
-}
-
 // Allow return if IPFilter allows the incoming ip.
 func (f *IPFilter) Allow(ipstr string) bool {
+	if f == nil {
+		return true
+	}
+
 	defaultResult := !f.spec.BlockByDefault
 
 	ip := net.ParseIP(ipstr)
@@ -108,6 +111,10 @@ func (f *IPFilter) Allow(ipstr string) bool {
 	allowed, err := f.allowRanger.Contains(ip)
 	if err != nil {
 		return defaultResult
+	}
+	// if AllowIPs is not empty, only allow IPs in AllowIPs
+	if len(f.spec.AllowIPs) > 0 && !allowed {
+		return false
 	}
 
 	blocked, err := f.blockRanger.Contains(ip)
@@ -142,11 +149,6 @@ func (f *IPFilters) Append(filter *IPFilter) {
 	f.filters = append(f.filters, filter)
 }
 
-// AllowHTTPContext is the wrapper of Allow for HTTPContext.
-func (f *IPFilters) AllowHTTPContext(ctx context.HTTPContext) bool {
-	return f.Allow(ctx.Request().RealIP())
-}
-
 // Allow return if IPFilters allows the incoming ip.
 func (f *IPFilters) Allow(ipstr string) bool {
 	for _, filter := range f.filters {
@@ -156,4 +158,24 @@ func (f *IPFilters) Allow(ipstr string) bool {
 	}
 
 	return true
+}
+
+// NewIPFilterChain returns nil if the number of final filters is zero.
+func NewIPFilterChain(parentIPFilters *IPFilters, childSpec *Spec) *IPFilters {
+	var ipFilters *IPFilters
+	if parentIPFilters != nil {
+		ipFilters = NewIPFilters(parentIPFilters.Filters()...)
+	} else {
+		ipFilters = NewIPFilters()
+	}
+
+	if childSpec != nil {
+		ipFilters.Append(New(childSpec))
+	}
+
+	if len(ipFilters.Filters()) == 0 {
+		return nil
+	}
+
+	return ipFilters
 }

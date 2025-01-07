@@ -2,13 +2,13 @@
 
 Port Layout:
 
-|   Member   | Cluster Client Port | Cluster Peer Port | API Port |
-| :--------: | :-----------------: | :---------------: | :------: |
-| writer-001 |        12379        |       12380       |  12381   |
-| writer-002 |        22379        |       22380       |  22381   |
-| writer-003 |        32379        |       22380       |  32381   |
-| reader-004 |          -          |         -         |  42381   |
-| reader-005 |          -          |         -         |  52381   |
+|    Member     | Cluster Client Port | Cluster Peer Port | API Port |
+|:-------------:|:-------------------:|:-----------------:|:--------:|
+|  primary-001  |        12379        |       12380       |  12381   |
+|  primary-002  |        22379        |       22380       |  22381   |
+|  primary-003  |        32379        |       22380       |  32381   |
+| secondary-004 |          -          |         -         |  42381   |
+| secondary-005 |          -          |         -         |  52381   |
 
 ## Start Easegress Cluster
 
@@ -54,7 +54,7 @@ The `check_cluster_status.sh` will list:
 ## Stop and Clean Easegress Cluster
 
 ```shell
- ./clean_eg_cluster.sh
+ ./clean_cluster.sh
 ```
 
 It will ignore step-stop if members have stopped.

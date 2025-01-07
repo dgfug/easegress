@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,15 +20,20 @@ package ingresscontroller
 import (
 	"fmt"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
-	"github.com/megaease/easegress/pkg/filter/proxy"
-	"github.com/megaease/easegress/pkg/logger"
-	"github.com/megaease/easegress/pkg/object/httppipeline"
-	"github.com/megaease/easegress/pkg/object/httpserver"
-	"github.com/megaease/easegress/pkg/supervisor"
-	"gopkg.in/yaml.v2"
+	"github.com/megaease/easegress/v2/pkg/object/httpserver/routers"
+
+	"github.com/megaease/easegress/v2/pkg/filters/proxies"
+	proxy "github.com/megaease/easegress/v2/pkg/filters/proxies/httpproxy"
+	"github.com/megaease/easegress/v2/pkg/logger"
+	"github.com/megaease/easegress/v2/pkg/object/httpserver"
+	"github.com/megaease/easegress/v2/pkg/object/pipeline"
+	"github.com/megaease/easegress/v2/pkg/supervisor"
+	"github.com/megaease/easegress/v2/pkg/util/codectool"
 	apicorev1 "k8s.io/api/core/v1"
 	apinetv1 "k8s.io/api/networking/v1"
 )
@@ -49,52 +54,119 @@ type (
 	}
 
 	pipelineSpecBuilder struct {
-		Kind              string `yaml:"kind"`
-		Name              string `yaml:"name"`
-		httppipeline.Spec `yaml:",inline"`
+		Kind          string `json:"kind"`
+		Name          string `json:"name"`
+		pipeline.Spec `json:",inline"`
 	}
 
 	httpServerSpecBuilder struct {
-		Kind            string `yaml:"kind"`
-		Name            string `yaml:"name"`
-		httpserver.Spec `yaml:",inline"`
+		Kind            string `json:"kind"`
+		Name            string `json:"name"`
+		httpserver.Spec `json:",inline"`
 	}
 )
 
 func newPipelineSpecBuilder(name string) *pipelineSpecBuilder {
 	return &pipelineSpecBuilder{
-		Kind: httppipeline.Kind,
+		Kind: pipeline.Kind,
 		Name: name,
-		Spec: httppipeline.Spec{},
+		Spec: pipeline.Spec{},
 	}
 }
 
-func (b *pipelineSpecBuilder) addProxy(endpoints []string) {
+func (b *pipelineSpecBuilder) addProxy(endpoints []string, ingress *apinetv1.Ingress) error {
 	const name = "proxy"
 
-	pool := &proxy.PoolSpec{
-		LoadBalance: &proxy.LoadBalance{
-			Policy: proxy.PolicyRoundRobin,
+	proxyLoadBalance := ingress.Annotations["easegress.ingress.kubernetes.io/proxy-load-balance"]
+	proxyHeaderHashKey := ingress.Annotations["easegress.ingress.kubernetes.io/proxy-header-hash-key"]
+	proxyForwardKey := ingress.Annotations["easegress.ingress.kubernetes.io/proxy-forward-key"]
+	proxyServerMaxSize := ingress.Annotations["easegress.ingress.kubernetes.io/proxy-server-max-size"]
+	proxyTimeout := ingress.Annotations["easegress.ingress.kubernetes.io/proxy-timeout"]
+
+	switch proxyLoadBalance {
+	case "":
+		proxyLoadBalance = proxies.LoadBalancePolicyRoundRobin
+	case proxies.LoadBalancePolicyRoundRobin, proxies.LoadBalancePolicyRandom,
+		proxies.LoadBalancePolicyWeightedRandom, proxies.LoadBalancePolicyIPHash,
+		proxies.LoadBalancePolicyHeaderHash:
+	default:
+		return fmt.Errorf("invalid proxy-load-balance: %s", proxyLoadBalance)
+	}
+
+	var maxSize int64 = -1
+	if proxyServerMaxSize != "" {
+		result, err := strconv.ParseInt(proxyServerMaxSize, 0, 64)
+		if err != nil {
+			return fmt.Errorf("invalid proxy-server-max-size: %v", err)
+		}
+		maxSize = result
+	}
+
+	var timeout time.Duration
+	if proxyTimeout != "" {
+		result, err := time.ParseDuration(proxyTimeout)
+		if err != nil {
+			return fmt.Errorf("invalid proxy-timeout: %v", err)
+		}
+		timeout = result
+	}
+
+	pool := &proxy.ServerPoolSpec{
+		BaseServerPoolSpec: proxy.BaseServerPoolSpec{
+			LoadBalance: &proxy.LoadBalanceSpec{
+				Policy:        proxyLoadBalance,
+				HeaderHashKey: proxyHeaderHashKey,
+				ForwardKey:    proxyForwardKey,
+			},
 		},
+		ServerMaxBodySize: -1,
 	}
 
 	for _, ep := range endpoints {
 		pool.Servers = append(pool.Servers, &proxy.Server{URL: ep})
 	}
 
-	b.Flow = append(b.Flow, httppipeline.Flow{Filter: name})
+	b.Flow = append(b.Flow, pipeline.FlowNode{FilterName: name})
 	b.Filters = append(b.Filters, map[string]interface{}{
-		"kind":     proxy.Kind,
-		"name":     name,
-		"mainPool": pool,
-	},
-	)
+		"kind":              proxy.Kind,
+		"name":              name,
+		"pools":             []*proxy.ServerPoolSpec{pool},
+		"serverMaxBodySize": maxSize,
+		"timeout":           timeout,
+	})
+
+	return nil
 }
 
-func (b *pipelineSpecBuilder) yamlConfig() string {
-	buff, err := yaml.Marshal(b)
+func (b *pipelineSpecBuilder) addWebSocketProxy(endpoints []string, clntMaxMsgSize, svrMaxMsgSize int64, insecure bool, originPatterns []string) {
+	const name = "websocketproxy"
+
+	pool := &proxy.WebSocketServerPoolSpec{
+		BaseServerPoolSpec: proxy.BaseServerPoolSpec{
+			LoadBalance: &proxy.LoadBalanceSpec{},
+		},
+		ClientMaxMsgSize:   clntMaxMsgSize,
+		ServerMaxMsgSize:   svrMaxMsgSize,
+		InsecureSkipVerify: insecure,
+		OriginPatterns:     originPatterns,
+	}
+
+	for _, ep := range endpoints {
+		pool.Servers = append(pool.Servers, &proxy.Server{URL: ep})
+	}
+
+	b.Flow = append(b.Flow, pipeline.FlowNode{FilterName: name})
+	b.Filters = append(b.Filters, map[string]interface{}{
+		"kind":  proxy.WebSocketProxyKind,
+		"name":  name,
+		"pools": []*proxy.WebSocketServerPoolSpec{pool},
+	})
+}
+
+func (b *pipelineSpecBuilder) jsonConfig() string {
+	buff, err := codectool.MarshalJSON(b)
 	if err != nil {
-		logger.Errorf("BUG: marshal %#v to yaml failed: %v", b, err)
+		logger.Errorf("BUG: marshal %#v to json failed: %v", b, err)
 	}
 	return string(buff)
 }
@@ -113,10 +185,10 @@ func newHTTPServerSpecBuilder(template *httpserver.Spec) *httpServerSpecBuilder 
 	}
 }
 
-func (b *httpServerSpecBuilder) yamlConfig() string {
-	buff, err := yaml.Marshal(b)
+func (b *httpServerSpecBuilder) jsonConfig() string {
+	buff, err := codectool.MarshalJSON(b)
 	if err != nil {
-		logger.Errorf("BUG: marshal %#v to yaml failed: %v", b, err)
+		logger.Errorf("BUG: marshal %#v to json failed: %v", b, err)
 	}
 	return string(buff)
 }
@@ -136,14 +208,6 @@ func (st *specTranslator) httpServerSpec() *supervisor.Spec {
 
 func (st *specTranslator) pipelineSpecs() map[string]*supervisor.Spec {
 	return st.pipelines
-}
-
-func generatePipelineSpec(name string, endpoints []string) (*supervisor.Spec, error) {
-	b := newPipelineSpecBuilder(name)
-	b.addProxy(endpoints)
-	yamlCfg := b.yamlConfig()
-	logger.Debugf("pipeline spec generated:\n%s", yamlCfg)
-	return supervisor.NewSpec(yamlCfg)
 }
 
 func (st *specTranslator) getEndpoints(namespace string, service *apinetv1.IngressServiceBackend) ([]string, error) {
@@ -207,7 +271,16 @@ func (st *specTranslator) getEndpoints(namespace string, service *apinetv1.Ingre
 	return result, nil
 }
 
-func (st *specTranslator) serviceToPipeline(namespace string, service *apinetv1.IngressServiceBackend) (*supervisor.Spec, error) {
+func supportWebSocket(ingress *apinetv1.Ingress) bool {
+	v := ingress.Annotations["easegress.ingress.kubernetes.io/websocket"]
+	if len(v) == 0 {
+		return false
+	}
+	b, _ := strconv.ParseBool(v)
+	return b
+}
+
+func (st *specTranslator) serviceToPipeline(ingress *apinetv1.Ingress, service *apinetv1.IngressServiceBackend) (*supervisor.Spec, error) {
 	if service == nil || len(service.Name) == 0 {
 		err := fmt.Errorf("invalid service name, ingress backend is object ref")
 		logger.Errorf("%v", err)
@@ -218,18 +291,44 @@ func (st *specTranslator) serviceToPipeline(namespace string, service *apinetv1.
 	if len(port) == 0 {
 		port = strconv.Itoa(int(service.Port.Number))
 	}
-	pipelineName := fmt.Sprintf("pipeline-%s-%s-%s", namespace, service.Name, port)
+	pipelineName := fmt.Sprintf("pipeline-%s-%s-%s", ingress.Namespace, service.Name, port)
+	ws := supportWebSocket(ingress)
+	if ws {
+		pipelineName += "-ws"
+	}
 	if st.pipelines[pipelineName] != nil {
 		return st.pipelines[pipelineName], nil
 	}
 
-	endpoints, err := st.getEndpoints(namespace, service)
+	endpoints, err := st.getEndpoints(ingress.Namespace, service)
 	if err != nil {
 		logger.Errorf("failed to get service endpoints: %v", err)
 		return nil, err
 	}
 
-	spec, err := generatePipelineSpec(pipelineName, endpoints)
+	builder := newPipelineSpecBuilder(pipelineName)
+	if ws {
+		val := ingress.Annotations["easegress.ingress.kubernetes.io/websocket-client-max-msg-size"]
+		clntMaxMsgSize, _ := strconv.ParseInt(val, 0, 64)
+
+		val = ingress.Annotations["easegress.ingress.kubernetes.io/websocket-server-max-msg-size"]
+		svrMaxMsgSize, _ := strconv.ParseInt(val, 0, 64)
+
+		val = ingress.Annotations["easegress.ingress.kubernetes.io/websocket-insecure-skip-verify"]
+		insecure, _ := strconv.ParseBool(val)
+
+		val = ingress.Annotations["easegress.ingress.kubernetes.io/websocket-origin-patterns"]
+		originPatterns := strings.Split(val, ",")
+
+		builder.addWebSocketProxy(endpoints, clntMaxMsgSize, svrMaxMsgSize, insecure, originPatterns)
+	} else {
+		err := builder.addProxy(endpoints, ingress)
+		if err != nil {
+			return nil, fmt.Errorf("failed to add proxy: %v", err)
+		}
+	}
+
+	spec, err := supervisor.NewSpec(builder.jsonConfig())
 	if err != nil {
 		logger.Errorf("failed to generate pipeline spec: %v", err)
 		return nil, err
@@ -252,7 +351,13 @@ func (st *specTranslator) translateDefaultPipeline(ingress *apinetv1.Ingress) er
 		return err
 	}
 
-	spec, err := generatePipelineSpec(defaultPipelineName, endpoints)
+	builder := newPipelineSpecBuilder(defaultPipelineName)
+	err = builder.addProxy(endpoints, ingress)
+	if err != nil {
+		return fmt.Errorf("failed to add proxy: %v", err)
+	}
+
+	spec, err := supervisor.NewSpec(builder.jsonConfig())
 	if err != nil {
 		logger.Errorf("failed to generate pipeline spec: %v", err)
 		return err
@@ -321,19 +426,23 @@ func (st *specTranslator) translateIngressRules(b *httpServerSpecBuilder, ingres
 			continue
 		}
 
-		r := httpserver.Rule{}
+		r := &routers.Rule{}
 		for _, path := range rule.HTTP.Paths {
-			pipeline, err := st.serviceToPipeline(ingress.Namespace, path.Backend.Service)
+			pipeline, err := st.serviceToPipeline(ingress, path.Backend.Service)
 			if err != nil {
 				continue
 			}
 
-			p := httpserver.Path{Backend: pipeline.Name()}
+			p := routers.Path{Backend: pipeline.Name()}
 			if path.PathType != nil && *path.PathType == apinetv1.PathTypeExact {
 				p.Path = path.Path
 			} else {
 				p.PathPrefix = path.Path
 			}
+
+			p.RewriteTarget = ingress.Annotations["easegress.ingress.kubernetes.io/rewrite-target"]
+			p.ClientMaxBodySize = -1
+
 			r.Paths = append(r.Paths, &p)
 		}
 
@@ -341,14 +450,31 @@ func (st *specTranslator) translateIngressRules(b *httpServerSpecBuilder, ingres
 			continue
 		}
 
+		var existingRule *routers.Rule
 		if len(rule.Host) > 0 && rule.Host[0] == '*' {
 			host := strings.ReplaceAll(rule.Host[1:], ".", "\\.")
 			r.HostRegexp = fmt.Sprintf("^[^.]+%s$", host)
+			for _, r1 := range b.Rules {
+				if strings.EqualFold(r.HostRegexp, r1.HostRegexp) {
+					existingRule = r1
+					break
+				}
+			}
 		} else {
 			r.Host = rule.Host
+			for _, r1 := range b.Rules {
+				if strings.EqualFold(r.Host, r1.Host) {
+					existingRule = r1
+					break
+				}
+			}
 		}
 
-		b.Rules = append(b.Rules, &r)
+		if existingRule == nil {
+			b.Rules = append(b.Rules, r)
+		} else {
+			existingRule.Paths = append(existingRule.Paths, r.Paths...)
+		}
 	}
 }
 
@@ -368,20 +494,65 @@ func (st *specTranslator) translate() error {
 		st.translateIngressRules(b, ingress)
 	}
 
+	// sort rules by host
+	// * precise hosts first(in alphabetical order)
+	// * wildcard hosts next(in alphabetical order)
+	// * empty host last
+	sort.Slice(b.Rules, func(i, j int) bool {
+		r1, r2 := b.Rules[i], b.Rules[j]
+
+		if r1.Host != "" {
+			if r2.Host == "" {
+				return true
+			}
+			return r1.Host < r2.Host
+		}
+		if r2.Host != "" {
+			return false
+		}
+
+		if r1.HostRegexp == "" {
+			return false
+		}
+		if r2.HostRegexp == "" {
+			return true
+		}
+		return r1.HostRegexp < r2.HostRegexp
+	})
+
 	if p := st.pipelines[defaultPipelineName]; p != nil {
-		b.Rules = append(b.Rules, &httpserver.Rule{
-			Paths: []*httpserver.Path{
-				{
-					Backend:    defaultPipelineName,
-					PathPrefix: "/",
-				},
-			},
+		r := b.Rules[len(b.Rules)-1]
+		if r.Host != "" || r.HostRegexp != "" {
+			r = &routers.Rule{}
+			b.Rules = append(b.Rules, r)
+		}
+		r.Paths = append(r.Paths, &routers.Path{
+			Backend:    defaultPipelineName,
+			PathPrefix: "/",
 		})
 	}
 
-	yamlCfg := b.yamlConfig()
-	logger.Debugf("http server spec:\n%s", yamlCfg)
-	spec, e := supervisor.NewSpec(yamlCfg)
+	// sort path:
+	// * precise path first
+	// * longer prefix first
+	for _, r := range b.Rules {
+		sort.Slice(r.Paths, func(i, j int) bool {
+			p1, p2 := r.Paths[i], r.Paths[j]
+			switch {
+			case p1.Path != "" && p2.Path != "":
+				return p1.Path < p2.Path
+			case p1.Path != "" && p2.Path == "":
+				return false
+			case p1.Path == "" && p2.Path != "":
+				return true
+			default: // p1.Path == "" && p2.Path == "":
+				return len(p1.PathPrefix) > len(p2.PathPrefix)
+			}
+		})
+	}
+
+	jsonConfig := b.jsonConfig()
+	spec, e := supervisor.NewSpec(jsonConfig)
 	if e != nil {
 		return e
 	}

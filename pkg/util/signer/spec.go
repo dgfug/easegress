@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -21,14 +21,14 @@ import "time"
 
 // Spec defines the configuration of a Signer
 type Spec struct {
-	Literal         *Literal          `yaml:"literial,omitempty" json:"literial,omitempty" jsonschema:"omitempty"`
-	HeaderHoisting  *HeaderHoisting   `yaml:"headerHoisting,omitempty" json:"headerHoisting,omitempty" jsonschema:"omitempty"`
-	IgnoredHeaders  []string          `yaml:"ignoredHeaders" json:"ignoredHeaders" jsonschema:"omitempty,uniqueItems=true"`
-	ExcludeBody     bool              `yaml:"excludeBody" json:"excludeBody" jsonschema:"omitempty"`
-	TTL             string            `yaml:"ttl" json:"ttl" jsonschema:"omitempty,format=duration"`
-	AccessKeyID     string            `yaml:"accessKeyId" json:"accessKeyId" jsonschema:"omitempty"`
-	AccessKeySecret string            `yaml:"accessKeySecret" json:"accessKeySecret" jsonschema:"omitempty"`
-	AccessKeys      map[string]string `yaml:"accessKeys" json:"accessKeys" jsonschema:"omitempty"`
+	Literal         *Literal          `json:"literal,omitempty"`
+	HeaderHoisting  *HeaderHoisting   `json:"headerHoisting,omitempty"`
+	IgnoredHeaders  []string          `json:"ignoredHeaders,omitempty" jsonschema:"uniqueItems=true"`
+	ExcludeBody     bool              `json:"excludeBody,omitempty"`
+	TTL             string            `json:"ttl,omitempty" jsonschema:"format=duration"`
+	AccessKeyID     string            `json:"accessKeyId,omitempty"`
+	AccessKeySecret string            `json:"accessKeySecret,omitempty"`
+	AccessKeys      map[string]string `json:"accessKeys,omitempty"`
 	// TODO: AccessKeys is used as an internal access key store, but an external store is also needed
 }
 

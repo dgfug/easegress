@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -123,7 +123,7 @@ func (lf *logFile) run() {
 	}
 }
 
-// Write writes log asynchronously, it always return successful result.
+// Write writes log asynchronously, it always returns successful result.
 func (lf *logFile) Write(p []byte) (int, error) {
 	// NOTE: The memory of p may be corrupted after Write returned
 	// So it's necessary to do copy.

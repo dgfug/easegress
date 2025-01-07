@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,7 +20,7 @@ package api
 import (
 	"net/http"
 
-	yaml "gopkg.in/yaml.v2"
+	"github.com/megaease/easegress/v2/pkg/util/codectool"
 )
 
 type (
@@ -28,8 +28,8 @@ type (
 
 	// Err is the standard return of error.
 	Err struct {
-		Code    int    `yaml:"code"`
-		Message string `yaml:"message"`
+		Code    int    `json:"code"`
+		Message string `json:"message"`
 	}
 )
 
@@ -45,7 +45,7 @@ func ClusterPanic(err error) {
 // HandleAPIError handles api error.
 func HandleAPIError(w http.ResponseWriter, r *http.Request, code int, err error) {
 	w.WriteHeader(code)
-	buff, err := yaml.Marshal(Err{
+	buff, err := codectool.MarshalJSON(Err{
 		Code:    code,
 		Message: err.Error(),
 	})

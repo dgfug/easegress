@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,17 +15,20 @@
  * limitations under the License.
  */
 
+// Package ingresscontroller implements a K8s ingress controller.
 package ingresscontroller
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/megaease/easegress/pkg/logger"
-	"github.com/megaease/easegress/pkg/object/httpserver"
-	"github.com/megaease/easegress/pkg/object/trafficcontroller"
-	"github.com/megaease/easegress/pkg/supervisor"
+	"github.com/megaease/easegress/v2/pkg/api"
+	"github.com/megaease/easegress/v2/pkg/logger"
+	"github.com/megaease/easegress/v2/pkg/object/httpserver"
+	"github.com/megaease/easegress/v2/pkg/object/trafficcontroller"
+	"github.com/megaease/easegress/v2/pkg/supervisor"
 )
 
 const (
@@ -38,6 +41,16 @@ const (
 	defaultIngressControllerName = "megaease.com/ingress-controller"
 	k8sIngressClassAnnotation    = "kubernetes.io/ingress.class"
 )
+
+func init() {
+	supervisor.Register(&IngressController{})
+	api.RegisterObject(&api.APIResource{
+		Category: Category,
+		Kind:     Kind,
+		Name:     strings.ToLower(Kind),
+		Aliases:  []string{"ingresscontrollers", "ingress"},
+	})
+}
 
 type (
 	// IngressController implements a K8s ingress controller
@@ -56,17 +69,13 @@ type (
 
 	// Spec is the ingress controller spec
 	Spec struct {
-		HTTPServer   *httpserver.Spec `yaml:"httpServer" jsonschema:"required"`
-		KubeConfig   string           `yaml:"kubeConfig" jsonschema:"omitempty"`
-		MasterURL    string           `yaml:"masterURL" jsonschema:"omitempty"`
-		Namespaces   []string         `yaml:"namespaces" jsonschema:"omitempty"`
-		IngressClass string           `yaml:"ingressClass" jsonschema:"omitempty"`
+		HTTPServer   *httpserver.Spec `json:"httpServer" jsonschema:"required"`
+		KubeConfig   string           `json:"kubeConfig,omitempty"`
+		MasterURL    string           `json:"masterURL,omitempty"`
+		Namespaces   []string         `json:"namespaces,omitempty"`
+		IngressClass string           `json:"ingressClass,omitempty"`
 	}
 )
-
-func init() {
-	supervisor.Register(&IngressController{})
-}
 
 // Category returns the category of IngressController.
 func (ic *IngressController) Category() supervisor.ObjectCategory {
@@ -207,7 +216,7 @@ func (ic *IngressController) translate() error {
 
 	pipelines := st.pipelineSpecs()
 	for _, spec := range pipelines {
-		_, err = ic.tc.ApplyHTTPPipelineForSpec(ic.namespace, spec)
+		_, err = ic.tc.ApplyPipelineForSpec(ic.namespace, spec)
 		if err != nil {
 			logger.Errorf("BUG: failed to apply pipeline spec to %s: %v", spec.Name(), err)
 		}
@@ -215,16 +224,16 @@ func (ic *IngressController) translate() error {
 	logger.Debugf("pipelines updated")
 
 	spec := st.httpServerSpec()
-	_, err = ic.tc.ApplyHTTPServerForSpec(ic.namespace, spec)
+	_, err = ic.tc.ApplyTrafficGateForSpec(ic.namespace, spec)
 	if err != nil {
 		logger.Errorf("BUG: failed to apply http server spec: %v", err)
 	} else {
 		logger.Debugf("http server updated")
 	}
 
-	for _, p := range ic.tc.ListHTTPPipelines(ic.namespace) {
+	for _, p := range ic.tc.ListPipelines(ic.namespace) {
 		if _, ok := pipelines[p.Spec().Name()]; !ok {
-			ic.tc.DeleteHTTPPipeline(ic.namespace, p.Spec().Name())
+			ic.tc.DeletePipeline(ic.namespace, p.Spec().Name())
 		}
 	}
 

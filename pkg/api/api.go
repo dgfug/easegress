@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,28 +15,32 @@
  * limitations under the License.
  */
 
+// Package api implements the HTTP API of Easegress.
 package api
 
 import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/megaease/easegress/pkg/logger"
-	yaml "gopkg.in/yaml.v2"
+	"github.com/megaease/easegress/v2/pkg/logger"
+	"github.com/megaease/easegress/v2/pkg/util/codectool"
 )
 
 func aboutText() string {
-	return fmt.Sprintf(`Copyright © 2017 - %d MegaEase(https://megaease.com). All rights reserved.
+	return fmt.Sprintf(`Copyright © 2017 - %d The Easegress Authors. All rights reserved.
 Powered by open-source software: Etcd(https://etcd.io), Apache License 2.0.
 `, time.Now().Year())
 }
 
 const (
-	// APIPrefix is the prefix of api.
-	APIPrefix = "/apis/v1"
+	// APIPrefixV1 is the prefix of v1 api, deprecated, will be removed soon.
+	APIPrefixV1 = "/apis/v1"
+	// APIPrefixV2 is the prefix of v2 api.
+	APIPrefixV2 = "/apis/v2"
 
 	lockKey = "/config/lock"
 
@@ -52,11 +56,11 @@ var (
 	appendAddonAPIs []func(s *Server, group *Group)
 )
 
-type apisbyOrder []*Group
+type apisByOrder []*Group
 
-func (a apisbyOrder) Less(i, j int) bool { return a[i].Group < a[j].Group }
-func (a apisbyOrder) Len() int           { return len(a) }
-func (a apisbyOrder) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a apisByOrder) Less(i, j int) bool { return a[i].Group < a[j].Group }
+func (a apisByOrder) Len() int           { return len(a) }
+func (a apisByOrder) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 
 // RegisterAPIs registers global admin APIs.
 func RegisterAPIs(apiGroup *Group) {
@@ -100,6 +104,10 @@ func (s *Server) registerAPIs() {
 	group.Entries = append(group.Entries, s.metadataAPIEntries()...)
 	group.Entries = append(group.Entries, s.healthAPIEntries()...)
 	group.Entries = append(group.Entries, s.aboutAPIEntries()...)
+	group.Entries = append(group.Entries, s.customDataAPIEntries()...)
+	group.Entries = append(group.Entries, s.profileAPIEntries()...)
+	group.Entries = append(group.Entries, s.prometheusMetricsAPIEntries()...)
+	group.Entries = append(group.Entries, s.logsAPIEntries()...)
 
 	for _, fn := range appendAddonAPIs {
 		fn(s, group)
@@ -146,18 +154,27 @@ func (s *Server) listAPIs(w http.ResponseWriter, r *http.Request) {
 	apisMutex.Lock()
 	defer apisMutex.Unlock()
 
-	apiGroups := []*Group{}
-
+	apiGroups := make([]*Group, 0, len(apis))
 	for _, group := range apis {
 		apiGroups = append(apiGroups, group)
 	}
 
-	sort.Sort(apisbyOrder(apiGroups))
+	sort.Sort(apisByOrder(apiGroups))
 
-	buff, err := yaml.Marshal(apiGroups)
-	if err != nil {
-		panic(fmt.Errorf("marshal %#v to yaml failed: %v", apiGroups, err))
+	WriteBody(w, r, apiGroups)
+}
+
+// WriteBody writes the body to the response writer in proper format.
+func WriteBody(w http.ResponseWriter, r *http.Request, body interface{}) {
+	buff := codectool.MustMarshalJSON(body)
+	contentType := "application/json"
+
+	accpetHeader := r.Header.Get("Accept")
+	if strings.Contains(accpetHeader, "yaml") {
+		buff = codectool.MustJSONToYAML(buff)
+		contentType = "text/x-yaml"
 	}
-	w.Header().Set("Content-Type", "text/vnd.yaml")
+
+	w.Header().Set("Content-Type", contentType)
 	w.Write(buff)
 }

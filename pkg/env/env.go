@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,11 +15,12 @@
  * limitations under the License.
  */
 
+// Package env provides functions for environment variables.
 package env
 
 import (
-	"github.com/megaease/easegress/pkg/common"
-	"github.com/megaease/easegress/pkg/option"
+	"github.com/megaease/easegress/v2/pkg/common"
+	"github.com/megaease/easegress/v2/pkg/option"
 )
 
 // InitServerDir initializes subdirs server needs.
@@ -42,16 +43,12 @@ func InitServerDir(opt *option.Options) error {
 		}
 	}
 
-	err = common.MkdirAll(opt.AbsLogDir)
-	if err != nil {
-		return err
+	if opt.AbsLogDir != "" {
+		err = common.MkdirAll(opt.AbsLogDir)
+		if err != nil {
+			return err
+		}
 	}
-
-	err = common.MkdirAll(opt.AbsMemberDir)
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -62,7 +59,8 @@ func CleanServerDir(opt *option.Options) {
 	if opt.AbsWALDir != "" {
 		common.RemoveAll(opt.AbsWALDir)
 	}
-	common.RemoveAll(opt.AbsMemberDir)
-	common.RemoveAll(opt.AbsLogDir)
+	if opt.AbsLogDir != "" {
+		common.RemoveAll(opt.AbsLogDir)
+	}
 	common.RemoveAll(opt.AbsHomeDir)
 }

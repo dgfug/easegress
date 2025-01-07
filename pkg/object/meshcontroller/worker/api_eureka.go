@@ -1,12 +1,12 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://wwwrk.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,11 +18,9 @@
 package worker
 
 import (
-	"bytes"
-	"encoding/json"
 	"encoding/xml"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -30,9 +28,10 @@ import (
 	"github.com/ArthurHlt/go-eureka-client/eureka"
 	"github.com/go-chi/chi/v5"
 
-	"github.com/megaease/easegress/pkg/api"
-	"github.com/megaease/easegress/pkg/logger"
-	"github.com/megaease/easegress/pkg/object/meshcontroller/registrycenter"
+	"github.com/megaease/easegress/v2/pkg/api"
+	"github.com/megaease/easegress/v2/pkg/logger"
+	"github.com/megaease/easegress/v2/pkg/object/meshcontroller/registrycenter"
+	"github.com/megaease/easegress/v2/pkg/util/codectool"
 )
 
 type (
@@ -139,7 +138,7 @@ func (worker *Worker) detectedAccept(accept string) string {
 }
 
 func (worker *Worker) eurekaRegister(w http.ResponseWriter, r *http.Request) {
-	body, err := ioutil.ReadAll(r.Body)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		api.HandleAPIError(w, r, http.StatusBadRequest,
 			fmt.Errorf("read body failed: %v", err))
@@ -189,7 +188,7 @@ func (worker *Worker) apps(w http.ResponseWriter, r *http.Request) {
 
 	accept := worker.detectedAccept(r.Header.Get("Accept"))
 
-	rsp, err := worker.encodByAcceptType(accept, jsonAPPs, xmlAPPs)
+	rsp, err := worker.encodeByAcceptType(accept, jsonAPPs, xmlAPPs)
 	if err != nil {
 		logger.Errorf("encode accept: %s failed: %v", accept, err)
 		api.HandleAPIError(w, r, http.StatusInternalServerError, err)
@@ -197,7 +196,7 @@ func (worker *Worker) apps(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", accept)
-	w.Write([]byte(rsp))
+	w.Write(rsp)
 }
 
 func (worker *Worker) app(w http.ResponseWriter, r *http.Request) {
@@ -233,7 +232,7 @@ func (worker *Worker) app(w http.ResponseWriter, r *http.Request) {
 			Instances: xmlAPP.Instances,
 		},
 	}
-	rsp, err := worker.encodByAcceptType(accept, jsonApp, xmlAPP)
+	rsp, err := worker.encodeByAcceptType(accept, jsonApp, xmlAPP)
 	if err != nil {
 		logger.Errorf("encode accept: %s failed: %v", accept, err)
 		api.HandleAPIError(w, r, http.StatusInternalServerError, err)
@@ -241,7 +240,7 @@ func (worker *Worker) app(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", accept)
-	w.Write([]byte(rsp))
+	w.Write(rsp)
 }
 
 func (worker *Worker) getAppInstance(w http.ResponseWriter, r *http.Request) {
@@ -266,14 +265,14 @@ func (worker *Worker) getAppInstance(w http.ResponseWriter, r *http.Request) {
 		ins := worker.registryServer.ToEurekaInstanceInfo(serviceInfo)
 		accept := worker.detectedAccept(w.Header().Get("Accept"))
 
-		rsp, err := worker.encodByAcceptType(accept, ins, ins)
+		rsp, err := worker.encodeByAcceptType(accept, ins, ins)
 		if err != nil {
 			logger.Errorf("encode accept: %s failed: %v", accept, err)
 			api.HandleAPIError(w, r, http.StatusInternalServerError, err)
 			return
 		}
 		w.Header().Set("Content-Type", accept)
-		w.Write([]byte(rsp))
+		w.Write(rsp)
 		return
 	}
 
@@ -300,25 +299,21 @@ func (worker *Worker) getInstance(w http.ResponseWriter, r *http.Request) {
 	ins := worker.registryServer.ToEurekaInstanceInfo(serviceInfo)
 	accept := worker.detectedAccept(r.Header.Get("Accept"))
 
-	rsp, err := worker.encodByAcceptType(accept, ins, ins)
+	rsp, err := worker.encodeByAcceptType(accept, ins, ins)
 	if err != nil {
 		logger.Errorf("encode accept: %s failed: %v", accept, err)
 		api.HandleAPIError(w, r, http.StatusInternalServerError, err)
 		return
 	}
 	w.Header().Set("Content-Type", accept)
-	w.Write([]byte(rsp))
+	w.Write(rsp)
 }
 
-func (worker *Worker) encodByAcceptType(accept string, jsonSt interface{}, xmlSt interface{}) ([]byte, error) {
+func (worker *Worker) encodeByAcceptType(accept string, jsonSt interface{}, xmlSt interface{}) ([]byte, error) {
 	switch accept {
 	case registrycenter.ContentTypeJSON:
-		buff := bytes.NewBuffer(nil)
-		enc := json.NewEncoder(buff)
-		err := enc.Encode(jsonSt)
-		return buff.Bytes(), err
+		return codectool.MarshalJSON(jsonSt)
 	default:
-		buff, err := xml.Marshal(xmlSt)
-		return buff, err
+		return xml.Marshal(xmlSt)
 	}
 }

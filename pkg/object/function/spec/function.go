@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,10 +20,10 @@ package spec
 import (
 	"fmt"
 
+	"github.com/megaease/easegress/v2/pkg/filters/builder"
 	k8sresource "k8s.io/apimachinery/pkg/api/resource"
 
-	"github.com/megaease/easegress/pkg/filter/requestadaptor"
-	"github.com/megaease/easegress/pkg/object/httpserver"
+	"github.com/megaease/easegress/v2/pkg/object/httpserver"
 )
 
 const (
@@ -42,58 +42,58 @@ type (
 	// Admin describes the Function.
 	Admin struct {
 		// SyncInterval is the interval for reconciling local FaaSFunction state and FaaSProvider's.
-		SyncInterval string `yaml:"syncInterval" jsonschema:"required,format=duration"`
+		SyncInterval string `json:"syncInterval" jsonschema:"required,format=duration"`
 
 		// Provider is the FaaSProvider.
-		Provider string `yaml:"provider" jsonschema:"required"`
+		Provider string `json:"provider" jsonschema:"required"`
 
 		// HTTPServer is the HTTP traffic gate for accepting ingress traffic.
-		HTTPServer *httpserver.Spec `yaml:"httpServer" jsonschema:"required"`
+		HTTPServer *httpserver.Spec `json:"httpServer" jsonschema:"required"`
 
 		// Currently we only supports knative type faas provider, so this filed should be
 		// "required" right now.
-		Knative *Knative `yaml:"knative" jsonschema:"required"`
+		Knative *Knative `json:"knative" jsonschema:"required"`
 	}
 
 	// Function contains the FaaSFunction's spec ,runtime status with a build-in fsm.
 	Function struct {
-		Spec   *Spec   `yaml:"spec" jsonschema:"required"`
-		Status *Status `yaml:"status" jsonschema:"required"`
-		Fsm    *FSM    `yaml:"fsm" jsonschema:"omitempty"`
+		Spec   *Spec   `json:"spec" jsonschema:"required"`
+		Status *Status `json:"status" jsonschema:"required"`
+		Fsm    *FSM    `json:"fsm,omitempty"`
 	}
 
 	// Spec is the spec of FaaSFunction.
 	Spec struct {
-		Name           string `yaml:"name" jsonschema:"required"`
-		Image          string `yaml:"image" jsonschema:"required"`
-		Port           int    `yaml:"port" jsonschema:"omitempty"`
-		AutoScaleType  string `yaml:"autoScaleType" jsonschema:"required"`
-		AutoScaleValue string `yaml:"autoScaleValue" jsonschema:"required"`
-		MinReplica     int    `yaml:"minReplica" jsonschema:"omitempty"`
-		MaxReplica     int    `yaml:"maxReplica" jsonschema:"omitempty"`
-		LimitCPU       string `yaml:"limitCPU" jsonschema:"omitempty"`
-		LimitMemory    string `yaml:"limitMemory" jsonschema:"omitempty"`
-		RequestCPU     string `yaml:"requestCPU" jsonschema:"omitempty"`
-		RequestMemory  string `yaml:"requestMemory" jsonschema:"omitempty"`
+		Name           string `json:"name" jsonschema:"required"`
+		Image          string `json:"image" jsonschema:"required"`
+		Port           int    `json:"port,omitempty"`
+		AutoScaleType  string `json:"autoScaleType" jsonschema:"required"`
+		AutoScaleValue string `json:"autoScaleValue" jsonschema:"required"`
+		MinReplica     int    `json:"minReplica,omitempty"`
+		MaxReplica     int    `json:"maxReplica,omitempty"`
+		LimitCPU       string `json:"limitCPU,omitempty"`
+		LimitMemory    string `json:"limitMemory,omitempty"`
+		RequestCPU     string `json:"requestCPU,omitempty"`
+		RequestMemory  string `json:"requestMemory,omitempty"`
 
-		RequestAdaptor *requestadaptor.Spec `yaml:"requestAdaptor" jsonschema:"required"`
+		RequestAdaptor *builder.RequestAdaptorSpec `json:"requestAdaptor" jsonschema:"required"`
 	}
 
 	// Status is the status of faas function.
 	Status struct {
-		Name    string            `yaml:"name" jsonschema:"required"`
-		State   State             `yaml:"state" jsonschema:"required"`
-		Event   Event             `yaml:"event" jsonschema:"required"`
-		ExtData map[string]string `yaml:"extData" jsonschema:"omitempty"`
+		Name    string            `json:"name" jsonschema:"required"`
+		State   State             `json:"state" jsonschema:"required"`
+		Event   Event             `json:"event" jsonschema:"required"`
+		ExtData map[string]string `json:"extData,omitempty"`
 	}
 
 	// Knative is the faas provider Knative.
 	Knative struct {
-		HostSuffix      string `yaml:"hostSuffix" jsonschema:"required"`
-		NetworkLayerURL string `yaml:"networkLayerURL" jsonschema:"required,format=uri"`
+		HostSuffix      string `json:"hostSuffix" jsonschema:"required"`
+		NetworkLayerURL string `json:"networkLayerURL" jsonschema:"required,format=uri"`
 
-		Namespace string `yaml:"namespace" jsonschema:"omitempty"`
-		Timeout   string `yaml:"timeout" jsonschema:"omitempty,format=duration"`
+		Namespace string `json:"namespace,omitempty"`
+		Timeout   string `json:"timeout,omitempty" jsonschema:"format=duration"`
 	}
 )
 

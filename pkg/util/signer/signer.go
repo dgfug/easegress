@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 
+// Package signer provides a signer for HTTP requests.
 package signer
 
 import (
@@ -23,7 +24,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/textproto"
 	"net/url"
@@ -49,43 +50,43 @@ type (
 	Literal struct {
 		// ScopeSuffix is the last part when build the credential scope.
 		// Default: megaease_request
-		ScopeSuffix string `yaml:"scopeSuffix" json:"scopeSuffix" jsonschema:"required"`
+		ScopeSuffix string `json:"scopeSuffix" jsonschema:"required"`
 
 		// AlgorithmName is the query name of the signature algorithm
 		// Default: X-Me-Algorithm
-		AlgorithmName string `yaml:"algorithmName" json:"algorithmName" jsonschema:"required"`
+		AlgorithmName string `json:"algorithmName" jsonschema:"required"`
 
 		// AlgorithmName is the header/query value of the signature algorithm
 		// Default: ME-HMAC-SHA256
-		AlgorithmValue string `yaml:"algorithmValue" json:"alrithmValue" jsonschema:"required"`
+		AlgorithmValue string `json:"algorithmValue" jsonschema:"required"`
 
 		// SignedHeaders is the header/query headers of the signed headers
 		// Default: X-Me-SignedHeaders
-		SignedHeaders string `yaml:"signedHeaders" json:"signedHeaders" jsonschema:"required"`
+		SignedHeaders string `json:"signedHeaders" jsonschema:"required"`
 
 		// Signature is the query name of the signature
 		// Default: X-Me-Signature
-		Signature string `yaml:"signature" json:"signature" jsonschema:"required"`
+		Signature string `json:"signature" jsonschema:"required"`
 
 		// Date is the header/query name of request time
 		// Default: X-Me-Date
-		Date string `yaml:"date" json:"date" jsonschema:"required"`
+		Date string `json:"date" jsonschema:"required"`
 
 		// Expires is the query name of expire duration
 		// Default: X-Me-Expires
-		Expires string `yaml:"expires" json:"expires" jsonschema:"required"`
+		Expires string `json:"expires" jsonschema:"required"`
 
 		// Credential is the query name of credential
 		// Default: X-Me-Credential
-		Credential string `yaml:"credential" json:"credential" jsonschema:"required"`
+		Credential string `json:"credential" jsonschema:"required"`
 
 		// ContentSHA256 is the header name of body/payload hash
 		// Default: X-Me-Content-Sha256
-		ContentSHA256 string `yaml:"contentSha256" json:"contentSha256" jsonschema:"required"`
+		ContentSHA256 string `json:"contentSha256" jsonschema:"required"`
 
 		// SigningKeyPrefix is prepend to access key secret when derive the signing key
 		// Default: ME
-		SigningKeyPrefix string `yaml:"signingKeyPrefix" json:"signingKeyPrefix" jsonschema:"omitempty"`
+		SigningKeyPrefix string `json:"signingKeyPrefix,omitempty"`
 	}
 
 	// HeaderHoisting defines which headers are allowed to be moved from header to query
@@ -93,9 +94,9 @@ type (
 	// disallowed prefixes and doesn't match any of disallowed names are allowed to be
 	// hoisted
 	HeaderHoisting struct {
-		AllowedPrefix    []string `yaml:"allowedPrefix" json:"allowedPrefix" jsonschema:"omitempty,uniqueItems=true"`
-		DisallowedPrefix []string `yaml:"disallowedPrefix" json:"disallowedPrefix" jsonschema:"omitempty,uniqueItems=true"`
-		Disallowed       []string `yaml:"disallowed" json:"disallowed" jsonschema:"omitempty,uniqueItems=true"`
+		AllowedPrefix    []string `json:"allowedPrefix,omitempty" jsonschema:"uniqueItems=true"`
+		DisallowedPrefix []string `json:"disallowedPrefix,omitempty" jsonschema:"uniqueItems=true"`
+		Disallowed       []string `json:"disallowed,omitempty" jsonschema:"uniqueItems=true"`
 		disallowed       map[string]bool
 	}
 
@@ -119,10 +120,11 @@ type (
 		accessKeyStore AccessKeyStore
 	}
 
-	// SigningContext is the signing context for a single request
-	SigningContext struct {
-		*Signer
-		isPresign bool
+	// Context is the signing/verfication context for a single request
+	Context struct {
+		signer      *Signer
+		isPresign   bool
+		excludeBody bool
 
 		Time        time.Time
 		Scopes      []string
@@ -204,65 +206,65 @@ func buildCanonicalURI(u *url.URL) string {
 }
 
 // SetLiteral is an option function for Signer to set literals
-func (signer *Signer) SetLiteral(literal *Literal) *Signer {
-	signer.literal = literal
-	return signer
+func (s *Signer) SetLiteral(literal *Literal) *Signer {
+	s.literal = literal
+	return s
 }
 
 // ExcludeBody is an option function for Signer to exclude body from signature
-func (signer *Signer) ExcludeBody(exclude bool) *Signer {
-	signer.excludeBody = exclude
-	return signer
+func (s *Signer) ExcludeBody(exclude bool) *Signer {
+	s.excludeBody = exclude
+	return s
 }
 
 // IgnoreHeader is an option function for Signer to add ignored headers
-func (signer *Signer) IgnoreHeader(headers ...string) *Signer {
+func (s *Signer) IgnoreHeader(headers ...string) *Signer {
 	for _, h := range headers {
-		signer.ignoredHeaders[h] = true
+		s.ignoredHeaders[h] = true
 	}
-	return signer
+	return s
 }
 
 // SetHeaderHoisting is an option function for Singer to set header hoisting
-func (signer *Signer) SetHeaderHoisting(hh *HeaderHoisting) *Signer {
+func (s *Signer) SetHeaderHoisting(hh *HeaderHoisting) *Signer {
 	hh.disallowed = map[string]bool{}
 	for _, s := range hh.Disallowed {
 		hh.disallowed[s] = true
 	}
-	signer.headerHoisting = hh
-	return signer
+	s.headerHoisting = hh
+	return s
 }
 
 // SetTTL is an option function for Signer to set time to live of a signature
-func (signer *Signer) SetTTL(d time.Duration) *Signer {
-	signer.ttl = d
-	return signer
+func (s *Signer) SetTTL(d time.Duration) *Signer {
+	s.ttl = d
+	return s
 }
 
 // SetAccessKeyStore is an option function for Signer to set access key store
-func (signer *Signer) SetAccessKeyStore(store AccessKeyStore) *Signer {
-	signer.accessKeyStore = store
-	return signer
+func (s *Signer) SetAccessKeyStore(store AccessKeyStore) *Signer {
+	s.accessKeyStore = store
+	return s
 }
 
 // SetCredential is an option function for Signer to set access key id/secret for signing
-func (signer *Signer) SetCredential(accessKeyID string, accessKeySecret string) *Signer {
-	signer.accessKeyID = accessKeyID
-	signer.accessKeySecret = accessKeySecret
-	return signer
+func (s *Signer) SetCredential(accessKeyID string, accessKeySecret string) *Signer {
+	s.accessKeyID = accessKeyID
+	s.accessKeySecret = accessKeySecret
+	return s
 }
 
 var defaultLiteral = &Literal{
-	ScopeSuffix:      "megaease_request",
-	AlgorithmName:    "X-Me-Algorithm",
-	AlgorithmValue:   "ME-HMAC-SHA256",
-	SignedHeaders:    "X-Me-SignedHeaders",
-	Signature:        "X-Me-Signature",
-	Date:             "X-Me-Date",
-	Expires:          "X-Me-Expires",
-	Credential:       "X-Me-Credential",
-	ContentSHA256:    "X-Me-Content-Sha256",
-	SigningKeyPrefix: "ME",
+	ScopeSuffix:      "request",
+	AlgorithmName:    "X-Algorithm",
+	AlgorithmValue:   "HMAC-SHA256",
+	SignedHeaders:    "X-SignedHeaders",
+	Signature:        "X-Signature",
+	Date:             "X-Date",
+	Expires:          "X-Expires",
+	Credential:       "X-Credential",
+	ContentSHA256:    "X-Content-Sha256",
+	SigningKeyPrefix: "",
 }
 
 // New creates a new signer
@@ -277,19 +279,36 @@ func New() *Signer {
 	return signer
 }
 
-// NewContext creates a new signing context for signing
-func (signer *Signer) NewContext(timestamp time.Time, scopes ...string) *SigningContext {
-	ctx := &SigningContext{
-		Signer:          signer,
+// NewSigningContext creates a new signing context for signing
+func (s *Signer) NewSigningContext(timestamp time.Time, scopes ...string) *Context {
+	ctx := &Context{
+		signer:          s,
+		excludeBody:     s.excludeBody,
 		Time:            timestamp.UTC(),
 		Scopes:          scopes,
-		AccessKeyID:     signer.accessKeyID,
-		AccessKeySecret: signer.accessKeySecret,
+		AccessKeyID:     s.accessKeyID,
+		AccessKeySecret: s.accessKeySecret,
 	}
 	return ctx
 }
 
-func (ctx *SigningContext) buildScopeString() {
+// NewVerificationContext creates a new verification context for verification.
+func (s *Signer) NewVerificationContext() *Context {
+	if s.accessKeyStore == nil {
+		panic("access key store must be set before calling NewVerificationContext")
+	}
+	return &Context{
+		signer:      s,
+		excludeBody: s.excludeBody,
+	}
+}
+
+// ExcludeBody is an option function for Context to exclude body from signature
+func (ctx *Context) ExcludeBody(exclude bool) {
+	ctx.excludeBody = exclude
+}
+
+func (ctx *Context) buildScopeString() {
 	if ctx.Time.IsZero() {
 		ctx.Time = time.Now().UTC()
 	}
@@ -301,12 +320,12 @@ func (ctx *SigningContext) buildScopeString() {
 		buf.WriteString(s)
 	}
 	buf.WriteByte('/')
-	buf.WriteString(ctx.literal.ScopeSuffix)
+	buf.WriteString(ctx.signer.literal.ScopeSuffix)
 	ctx.scopeString = buf.String()
 }
 
-func (ctx *SigningContext) deriveSigningKey() []byte {
-	key := []byte(ctx.literal.SigningKeyPrefix + ctx.AccessKeySecret)
+func (ctx *Context) deriveSigningKey() []byte {
+	key := []byte(ctx.signer.literal.SigningKeyPrefix + ctx.AccessKeySecret)
 
 	t := formatDate(ctx.Time)
 	key = hmacDigest(key, []byte(t))
@@ -314,27 +333,28 @@ func (ctx *SigningContext) deriveSigningKey() []byte {
 		key = hmacDigest(key, []byte(s))
 	}
 
-	return hmacDigest(key, []byte(ctx.literal.ScopeSuffix))
+	return hmacDigest(key, []byte(ctx.signer.literal.ScopeSuffix))
 }
 
-func (ctx *SigningContext) getCanonicalQuery(u *url.URL) string {
-	ctx.Query.Del(ctx.literal.Signature)
+func (ctx *Context) getCanonicalQuery(u *url.URL) string {
+	l := ctx.signer.literal
+	ctx.Query.Del(l.Signature)
 
 	if ctx.isPresign {
-		ctx.Query.Set(ctx.literal.AlgorithmName, ctx.literal.AlgorithmValue)
-		ctx.Query.Set(ctx.literal.Date, formatTime(ctx.Time))
-		ctx.Query.Set(ctx.literal.Credential, ctx.AccessKeyID+"/"+ctx.scopeString)
+		ctx.Query.Set(l.AlgorithmName, l.AlgorithmValue)
+		ctx.Query.Set(l.Date, formatTime(ctx.Time))
+		ctx.Query.Set(l.Credential, ctx.AccessKeyID+"/"+ctx.scopeString)
 
 		duration := int64(ctx.ExpireTime / time.Second)
-		ctx.Query.Set(ctx.literal.Expires, strconv.FormatInt(duration, 10))
+		ctx.Query.Set(l.Expires, strconv.FormatInt(duration, 10))
 
-		ctx.Query.Set(ctx.literal.SignedHeaders, ctx.SignedHeaders)
+		ctx.Query.Set(l.SignedHeaders, ctx.SignedHeaders)
 	} else {
-		ctx.Query.Del(ctx.literal.AlgorithmName)
-		ctx.Query.Del(ctx.literal.Credential)
-		ctx.Query.Del(ctx.literal.Date)
-		ctx.Query.Del(ctx.literal.Expires)
-		ctx.Query.Del(ctx.literal.SignedHeaders)
+		ctx.Query.Del(l.AlgorithmName)
+		ctx.Query.Del(l.Credential)
+		ctx.Query.Del(l.Date)
+		ctx.Query.Del(l.Expires)
+		ctx.Query.Del(l.SignedHeaders)
 	}
 
 	for _, v := range ctx.Query {
@@ -344,8 +364,10 @@ func (ctx *SigningContext) getCanonicalQuery(u *url.URL) string {
 }
 
 // for each str in strs
-//   trim leading & trailing spaces
-//   convert sequential spaces to single space
+//
+//	trim leading & trailing spaces
+//	convert sequential spaces to single space
+//
 // then join all the strs with comma
 func buildCanonicalHeaderValue(strs []string) string {
 	var buf bytes.Buffer
@@ -417,22 +439,23 @@ func getHost(req *http.Request) string {
 	return host
 }
 
-func (ctx *SigningContext) needHoisting(header string) bool {
-	if (!ctx.isPresign) || (ctx.headerHoisting == nil) {
+func (ctx *Context) needHoisting(header string) bool {
+	hh := ctx.signer.headerHoisting
+	if (!ctx.isPresign) || (hh == nil) {
 		return false
 	}
-	if ctx.headerHoisting.disallowed[header] {
+	if hh.disallowed[header] {
 		return false
 	}
-	for _, prefix := range ctx.headerHoisting.DisallowedPrefix {
+	for _, prefix := range hh.DisallowedPrefix {
 		if strings.HasPrefix(header, prefix) {
 			return false
 		}
 	}
-	if len(ctx.headerHoisting.AllowedPrefix) == 0 {
+	if len(hh.AllowedPrefix) == 0 {
 		return true
 	}
-	for _, prefix := range ctx.headerHoisting.AllowedPrefix {
+	for _, prefix := range hh.AllowedPrefix {
 		if strings.HasPrefix(header, prefix) {
 			return true
 		}
@@ -440,7 +463,7 @@ func (ctx *SigningContext) needHoisting(header string) bool {
 	return false
 }
 
-func (ctx *SigningContext) buildCanonicalHeaders(req *http.Request) {
+func (ctx *Context) buildCanonicalHeaders(req *http.Request) {
 	type pair struct {
 		Name  string
 		Value string
@@ -453,7 +476,7 @@ func (ctx *SigningContext) buildCanonicalHeaders(req *http.Request) {
 	})
 
 	for k, v := range req.Header {
-		if ctx.ignoredHeaders[k] {
+		if ctx.signer.ignoredHeaders[k] {
 			continue
 		}
 
@@ -488,11 +511,11 @@ func (ctx *SigningContext) buildCanonicalHeaders(req *http.Request) {
 	ctx.CanonicalHeaders = bufHeader.String()
 }
 
-func (ctx *SigningContext) hashBody(req *http.Request, verify bool) error {
+func (ctx *Context) hashBody(req *http.Request, getBody func() io.Reader, verify bool) error {
 	// we cannot use body hash in header during verify, otherwise, an attacker
 	// will use an existing body hash with a new body
 	if !verify {
-		ctx.BodyHash = req.Header.Get(ctx.literal.ContentSHA256)
+		ctx.BodyHash = req.Header.Get(ctx.signer.literal.ContentSHA256)
 		if ctx.BodyHash != "" {
 			return nil
 		}
@@ -501,25 +524,38 @@ func (ctx *SigningContext) hashBody(req *http.Request, verify bool) error {
 	if ctx.excludeBody {
 		ctx.BodyHash = unsignedPayload
 		if !verify {
-			req.Header.Set(ctx.literal.ContentSHA256, ctx.BodyHash)
+			req.Header.Set(ctx.signer.literal.ContentSHA256, ctx.BodyHash)
 		}
-	} else if req.Body == nil {
-		// sha256 of empty string
-		ctx.BodyHash = sha256Empty
+		return nil
+	}
+
+	var body io.Reader
+	if getBody == nil {
+		body = req.Body
 	} else {
-		body, e := ioutil.ReadAll(req.Body)
-		if e != nil {
-			return e
-		}
+		body = getBody()
+	}
+
+	if body == nil {
+		ctx.BodyHash = sha256Empty // sha256 of empty string
+		return nil
+	}
+
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return err
+	}
+	ctx.BodyHash = sha256DegistAndEncodeToHexString(data)
+
+	if getBody == nil {
 		req.Body.Close()
-		req.Body = ioutil.NopCloser(bytes.NewReader(body))
-		ctx.BodyHash = sha256DegistAndEncodeToHexString(body)
+		req.Body = io.NopCloser(bytes.NewReader(data))
 	}
 
 	return nil
 }
 
-func (ctx *SigningContext) hashCanonicalRequest(req *http.Request) string {
+func (ctx *Context) hashCanonicalRequest(req *http.Request) string {
 	var buf bytes.Buffer
 
 	buf.WriteString(req.Method)
@@ -543,10 +579,10 @@ func (ctx *SigningContext) hashCanonicalRequest(req *http.Request) string {
 }
 
 // sign calculate the signature of the request, but does not modify it
-func (ctx *SigningContext) sign(req *http.Request) {
+func (ctx *Context) sign(req *http.Request) {
 	var buf bytes.Buffer
 
-	buf.WriteString(ctx.literal.AlgorithmValue)
+	buf.WriteString(ctx.signer.literal.AlgorithmValue)
 	buf.WriteByte('\n')
 
 	buf.WriteString(formatTime(ctx.Time))
@@ -563,28 +599,28 @@ func (ctx *SigningContext) sign(req *http.Request) {
 	ctx.Signature = hex.EncodeToString(hash)
 }
 
-func (ctx *SigningContext) prepare(req *http.Request) error {
+func (ctx *Context) prepare(req *http.Request, getBody func() io.Reader) error {
 	ctx.buildScopeString()
 	ctx.Query = req.URL.Query()
-	if e := ctx.hashBody(req, false); e != nil {
+	if e := ctx.hashBody(req, getBody, false); e != nil {
 		return e
 	}
 	if !ctx.isPresign {
-		req.Header.Set(ctx.literal.Date, formatTime(ctx.Time))
+		req.Header.Set(ctx.signer.literal.Date, formatTime(ctx.Time))
 	}
 	ctx.buildCanonicalHeaders(req)
 	return nil
 }
 
 // Sign calculate the signature and add it to request header
-func (ctx *SigningContext) Sign(req *http.Request) error {
-	if e := ctx.prepare(req); e != nil {
+func (ctx *Context) Sign(req *http.Request, getBody func() io.Reader) error {
+	if e := ctx.prepare(req, getBody); e != nil {
 		return e
 	}
 	ctx.sign(req)
 
 	sig := fmt.Sprintf("%s Credential=%s/%s, SignedHeaders=%s, Signature=%s",
-		ctx.literal.AlgorithmValue,
+		ctx.signer.literal.AlgorithmValue,
 		ctx.AccessKeyID,
 		ctx.scopeString,
 		ctx.SignedHeaders,
@@ -596,21 +632,21 @@ func (ctx *SigningContext) Sign(req *http.Request) error {
 }
 
 // Presign calculate the signature and add it to request url
-func (ctx *SigningContext) Presign(req *http.Request, expireTime time.Duration) error {
+func (ctx *Context) Presign(req *http.Request, expireTime time.Duration) error {
 	ctx.isPresign = true
 	ctx.ExpireTime = expireTime
 
-	if e := ctx.prepare(req); e != nil {
+	if e := ctx.prepare(req, nil); e != nil {
 		return e
 	}
 	ctx.sign(req)
 
-	ctx.Query.Add(ctx.literal.Signature, ctx.Signature)
+	ctx.Query.Add(ctx.signer.literal.Signature, ctx.Signature)
 	req.URL.RawQuery = strings.Replace(ctx.Query.Encode(), "+", "%20", -1)
 	return nil
 }
 
-func (ctx *SigningContext) initFromHeader(req *http.Request) error {
+func (ctx *Context) initFromHeader(req *http.Request) error {
 	const invalidHeaderFormat = "invalid header format: %s"
 
 	hdr := req.Header.Get(authHeader)
@@ -619,7 +655,7 @@ func (ctx *SigningContext) initFromHeader(req *http.Request) error {
 		return fmt.Errorf(invalidHeaderFormat, authHeader)
 	}
 
-	if hdr[:idx] != ctx.literal.AlgorithmValue {
+	if hdr[:idx] != ctx.signer.literal.AlgorithmValue {
 		return fmt.Errorf(invalidHeaderFormat, authHeader)
 	}
 
@@ -651,11 +687,11 @@ func (ctx *SigningContext) initFromHeader(req *http.Request) error {
 	}
 	ctx.Signature = str[10:]
 
-	hdr = req.Header.Get(ctx.literal.Date)
+	hdr = req.Header.Get(ctx.signer.literal.Date)
 	if !strings.HasPrefix(hdr, scopes[1]) {
 		return fmt.Errorf("signature timestamp mismatch")
 	} else if t, e := time.ParseInLocation(timeFormat, hdr, time.UTC); e != nil {
-		return fmt.Errorf(invalidHeaderFormat, ctx.literal.Date)
+		return fmt.Errorf(invalidHeaderFormat, ctx.signer.literal.Date)
 	} else {
 		ctx.Time = t
 	}
@@ -663,45 +699,46 @@ func (ctx *SigningContext) initFromHeader(req *http.Request) error {
 	return nil
 }
 
-func (ctx *SigningContext) initFromQuery(req *http.Request) error {
+func (ctx *Context) initFromQuery(req *http.Request) error {
 	const invalidQuery = "invalid query value: %s"
 	ctx.isPresign = true
+	l := ctx.signer.literal
 
-	if ctx.Query.Get(ctx.literal.AlgorithmName) != ctx.literal.AlgorithmValue {
-		return fmt.Errorf(invalidQuery, ctx.literal.AlgorithmName)
+	if ctx.Query.Get(l.AlgorithmName) != l.AlgorithmValue {
+		return fmt.Errorf(invalidQuery, l.AlgorithmName)
 	}
 
-	str := ctx.Query.Get(ctx.literal.Credential)
+	str := ctx.Query.Get(l.Credential)
 	scopes := strings.Split(str, "/")
 	if len(scopes) < 3 {
-		return fmt.Errorf(invalidQuery, ctx.literal.Credential)
+		return fmt.Errorf(invalidQuery, l.Credential)
 	}
 	ctx.AccessKeyID = scopes[0]
 	ctx.Scopes = scopes[2 : len(scopes)-1]
 
-	str = ctx.Query.Get(ctx.literal.Date)
+	str = ctx.Query.Get(l.Date)
 	if !strings.HasPrefix(str, scopes[1]) {
 		return fmt.Errorf("signature timestamp mismatch")
 	} else if t, e := time.ParseInLocation(timeFormat, str, time.UTC); e != nil {
-		return fmt.Errorf(invalidQuery, ctx.literal.Date)
+		return fmt.Errorf(invalidQuery, l.Date)
 	} else {
 		ctx.Time = t
 	}
 
-	str = ctx.Query.Get(ctx.literal.Expires)
+	str = ctx.Query.Get(l.Expires)
 	v, e := strconv.ParseUint(str, 0, 64)
 	if e != nil {
-		return fmt.Errorf(invalidQuery, ctx.literal.Expires)
+		return fmt.Errorf(invalidQuery, l.Expires)
 	}
 	ctx.ExpireTime = time.Duration(v) * time.Second
 
-	ctx.SignedHeaders = ctx.Query.Get(ctx.literal.SignedHeaders)
-	ctx.Signature = ctx.Query.Get(ctx.literal.Signature)
+	ctx.SignedHeaders = ctx.Query.Get(l.SignedHeaders)
+	ctx.Signature = ctx.Query.Get(l.Signature)
 
 	return nil
 }
 
-func (ctx *SigningContext) initFromSignedRequest(req *http.Request) error {
+func (ctx *Context) initFromSignedRequest(req *http.Request) error {
 	ctx.Query = req.URL.Query()
 
 	if req.Header.Get(authHeader) != "" {
@@ -739,19 +776,14 @@ func (ctx *SigningContext) initFromSignedRequest(req *http.Request) error {
 }
 
 // Verify verifies the signature of a request
-func (signer *Signer) Verify(req *http.Request) error {
-	if signer.accessKeyStore == nil {
-		panic("access key store must be set before calling Verify")
-	}
-
-	ctx := &SigningContext{Signer: signer}
+func (ctx *Context) Verify(req *http.Request, getBody func() io.Reader) error {
 	if e := ctx.initFromSignedRequest(req); e != nil {
 		return e
 	}
 
-	age := time.Now().Sub(ctx.Time)
-	if ctx.ttl > 0 {
-		if age < -ctx.ttl || age > ctx.ttl {
+	age := time.Since(ctx.Time)
+	if ctx.signer.ttl > 0 {
+		if age < -ctx.signer.ttl || age > ctx.signer.ttl {
 			return fmt.Errorf("signature expired")
 		}
 	}
@@ -761,14 +793,14 @@ func (signer *Signer) Verify(req *http.Request) error {
 		}
 	}
 
-	secret, ok := signer.accessKeyStore.GetSecret(ctx.AccessKeyID)
+	secret, ok := ctx.signer.accessKeyStore.GetSecret(ctx.AccessKeyID)
 	if !ok {
 		return fmt.Errorf("access-key-id not found")
 	}
 	ctx.AccessKeySecret = secret
 
 	sig := ctx.Signature
-	if e := ctx.hashBody(req, true); e != nil {
+	if e := ctx.hashBody(req, getBody, true); e != nil {
 		return e
 	}
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -68,7 +68,8 @@ func runCase(s *Semaphore, maxCount int64, t *testing.T) {
 	wg.Wait()
 
 	// step 2: try to acquire one more, should timeout
-	ctx, _ := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
 	err := s.AcquireWithContext(ctx)
 	if err == nil {
 		t.Fatalf("sema count exceeds the maxCount: %d", maxCount)

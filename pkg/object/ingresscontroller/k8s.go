@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,15 +19,18 @@ package ingresscontroller
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
-	"github.com/megaease/easegress/pkg/logger"
+	"github.com/megaease/easegress/v2/pkg/logger"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/informers"
 	corev1 "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/informers/internalinterfaces"
 	networkingv1 "k8s.io/client-go/informers/networking/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
 	apicorev1 "k8s.io/api/core/v1"
@@ -114,7 +117,7 @@ type k8sClient struct {
 }
 
 // OnAdd is called on Resource Add Events.
-func (c *k8sClient) OnAdd(obj interface{}) {
+func (c *k8sClient) OnAdd(obj interface{}, isInInitialList bool) {
 	// if there's an event already in the channel, discard this one,
 	// this is fine because IngressController always reload everything
 	// when receiving an event. Same for OnUpdate & OnDelete
@@ -157,10 +160,46 @@ func newK8sClient(masterURL string, kubeConfig string) (*k8sClient, error) {
 		return nil, err
 	}
 
+	err = checkKubernetesVersion(cfg)
+	if err != nil {
+		logger.Errorf("error checking kubernetes version: %s", err.Error())
+		return nil, err
+	}
+
 	return &k8sClient{
 		clientset: clientset,
 		eventCh:   make(chan interface{}, 1),
 	}, nil
+}
+
+func checkKubernetesVersion(cfg *rest.Config) (err error) {
+	cli, err := discovery.NewDiscoveryClientForConfig(cfg)
+	if err != nil {
+		err = fmt.Errorf("failed to get kubernetes version: %v", err.Error())
+		return
+	}
+
+	info, err := cli.ServerVersion()
+	if err != nil {
+		return
+	}
+	if info.Major != "1" {
+		err = fmt.Errorf("unknown kubernetes major version: %v", info.Major)
+		return
+	}
+
+	minor, err := strconv.Atoi(info.Minor)
+	if err != nil {
+		err = fmt.Errorf("unknown kubernetes minor version: %v, %s", info.Minor, err.Error())
+		return
+	}
+
+	if minor < 19 {
+		// Ingress version v1 has been added after kubernetes 1.19
+		panic(fmt.Errorf("kubernetes version [%v] is too low, IngressController requires kubernetes v1.19+", info.GitVersion))
+	}
+
+	return
 }
 
 func (c *k8sClient) event() <-chan interface{} {

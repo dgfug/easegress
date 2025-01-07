@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,10 +15,12 @@
  * limitations under the License.
  */
 
+// Package command provides the commands.
 package command
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/spf13/cobra"
@@ -29,7 +31,7 @@ func ObjectCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "object",
 		Aliases: []string{"o", "obj"},
-		Short:   "View and change objects",
+		Short:   "(Deprecated) View and change objects",
 	}
 
 	cmd.AddCommand(objectKindsCmd())
@@ -48,7 +50,7 @@ func objectKindsCmd() *cobra.Command {
 		Use:   "kinds",
 		Short: "List available object kinds.",
 		Run: func(cmd *cobra.Command, args []string) {
-			handleRequest(http.MethodGet, makeURL(objectKindsURL), nil, cmd)
+			handleRequest(http.MethodGet, makePath(objectKindsURL), nil, cmd)
 		},
 	}
 
@@ -61,8 +63,12 @@ func createObjectCmd() *cobra.Command {
 		Use:   "create",
 		Short: "Create an object from a yaml file or stdin",
 		Run: func(cmd *cobra.Command, args []string) {
-			buff, _ := readFromFileOrStdin(specFile, cmd)
-			handleRequest(http.MethodPost, makeURL(objectsURL), buff, cmd)
+			visitor := buildSpecVisitor(specFile, cmd)
+			visitor.Visit(func(s *spec) error {
+				handleRequest(http.MethodPost, makePath(objectsURL), []byte(s.doc), cmd)
+				return nil
+			})
+			visitor.Close()
 		},
 	}
 
@@ -77,8 +83,12 @@ func updateObjectCmd() *cobra.Command {
 		Use:   "update",
 		Short: "Update an object from a yaml file or stdin",
 		Run: func(cmd *cobra.Command, args []string) {
-			buff, name := readFromFileOrStdin(specFile, cmd)
-			handleRequest(http.MethodPut, makeURL(objectURL, name), buff, cmd)
+			visitor := buildSpecVisitor(specFile, cmd)
+			visitor.Visit(func(s *spec) error {
+				handleRequest(http.MethodPut, makePath(objectURL, s.Name), []byte(s.doc), cmd)
+				return nil
+			})
+			visitor.Close()
 		},
 	}
 
@@ -88,23 +98,48 @@ func updateObjectCmd() *cobra.Command {
 }
 
 func deleteObjectCmd() *cobra.Command {
+	var specFile string
+	var allFlag bool
 	cmd := &cobra.Command{
-		Use:     "delete",
-		Short:   "Delete an object",
-		Example: "egctl object delete <object_name>",
+		Use:   "delete",
+		Short: "Delete an object from a yaml file or name",
 		Args: func(cmd *cobra.Command, args []string) error {
-			if len(args) != 1 {
-				return errors.New("requires one object name to be deleted")
+			if allFlag {
+				if len(specFile) != 0 {
+					return errors.New("--all and --file cannot be used together")
+				}
+				if len(args) != 0 {
+					return errors.New("--all and <object_name> cannot be used together")
+				}
+			}
+
+			if len(args) != 0 && len(specFile) != 0 {
+				return errors.New("--file and <object_name> cannot be used together")
 			}
 
 			return nil
 		},
-
 		Run: func(cmd *cobra.Command, args []string) {
-			handleRequest(http.MethodDelete, makeURL(objectURL, args[0]), nil, cmd)
+			if allFlag {
+				handleRequest(http.MethodDelete, makePath(objectsURL+fmt.Sprintf("?all=%v", true)), nil, cmd)
+				return
+			}
+
+			if len(specFile) != 0 {
+				visitor := buildSpecVisitor(specFile, cmd)
+				visitor.Visit(func(s *spec) error {
+					handleRequest(http.MethodDelete, makePath(objectURL, s.Name), nil, cmd)
+					return nil
+				})
+				visitor.Close()
+				return
+			}
+
+			handleRequest(http.MethodDelete, makePath(objectURL, args[0]), nil, cmd)
 		},
 	}
-
+	cmd.Flags().StringVarP(&specFile, "file", "f", "", "A yaml file specifying the object.")
+	cmd.Flags().BoolVarP(&allFlag, "all", "", false, "Delete all object.")
 	return cmd
 }
 
@@ -122,7 +157,7 @@ func getObjectCmd() *cobra.Command {
 		},
 
 		Run: func(cmd *cobra.Command, args []string) {
-			handleRequest(http.MethodGet, makeURL(objectURL, args[0]), nil, cmd)
+			handleRequest(http.MethodGet, makePath(objectURL, args[0]), nil, cmd)
 		},
 	}
 
@@ -135,7 +170,7 @@ func listObjectsCmd() *cobra.Command {
 		Short:   "List all objects",
 		Example: "egctl object list",
 		Run: func(cmd *cobra.Command, args []string) {
-			handleRequest(http.MethodGet, makeURL(objectsURL), nil, cmd)
+			handleRequest(http.MethodGet, makePath(objectsURL), nil, cmd)
 		},
 	}
 
@@ -169,7 +204,7 @@ func getStatusObjectCmd() *cobra.Command {
 		},
 
 		Run: func(cmd *cobra.Command, args []string) {
-			handleRequest(http.MethodGet, makeURL(statusObjectURL, args[0]), nil, cmd)
+			handleRequest(http.MethodGet, makePath(statusObjectURL, args[0]), nil, cmd)
 		},
 	}
 
@@ -182,7 +217,7 @@ func listStatusObjectsCmd() *cobra.Command {
 		Short:   "List all status of objects",
 		Example: "egctl object status list",
 		Run: func(cmd *cobra.Command, args []string) {
-			handleRequest(http.MethodGet, makeURL(statusObjectsURL), nil, cmd)
+			handleRequest(http.MethodGet, makePath(statusObjectsURL), nil, cmd)
 		},
 	}
 

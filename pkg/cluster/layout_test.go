@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,16 +19,15 @@ package cluster
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestLayout(t *testing.T) {
+	assert := assert.New(t)
 	l := Layout{}
 
 	if len(l.OtherLease("member-1")) == 0 {
-		t.Error("other lease  empty")
-	}
-
-	if len(l.StatusObjectPrefix("member-1")) == 0 {
 		t.Error("other lease  empty")
 	}
 
@@ -44,7 +43,7 @@ func TestLayout(t *testing.T) {
 		t.Error("StatusObjectsPrefix empty")
 	}
 
-	if len(l.StatusObjectKey("member-1")) == 0 {
+	if len(l.StatusObjectKey("default", "member-1")) == 0 {
 		t.Error("StatusObjectKey key empty")
 	}
 
@@ -63,4 +62,14 @@ func TestLayout(t *testing.T) {
 	if len(l.WasmCodeEvent()) == 0 {
 		t.Error("WasmCodeEvent empty")
 	}
+
+	if len(l.WasmDataPrefix("pipeline", "wasm")) == 0 {
+		t.Error("WasmDataPrefix empty")
+	}
+
+	assert.Equal(customDataPrefix, l.CustomDataPrefix())
+	assert.Equal(customDataKindPrefix, l.CustomDataKindPrefix())
+
+	assert.Equal("eg-cluster", SystemNamespace("cluster"))
+	assert.Equal("eg-traffic-cluster", TrafficNamespace("cluster"))
 }

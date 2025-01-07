@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 
+// Package timetool provides time utilities.
 package timetool
 
 import (
@@ -57,7 +58,11 @@ func (dt *DistributedTimer) run() {
 		case <-dt.done:
 			return
 		case now := <-time.After(dt.nextDurationFunc()):
-			dt.C <- now
+			// NOTE: Use a select-statement to avoid block and always send last time.
+			select {
+			case dt.C <- now:
+			default:
+			}
 		}
 	}
 }

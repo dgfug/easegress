@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,17 +18,18 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
+	"path"
 	"sort"
 
 	"github.com/go-chi/chi/v5"
-	v1alpha1 "github.com/megaease/easemesh-api/v1alpha1"
+	v2alpha1 "github.com/megaease/easemesh-api/v2alpha1"
 
-	"github.com/megaease/easegress/pkg/api"
-	"github.com/megaease/easegress/pkg/logger"
-	"github.com/megaease/easegress/pkg/object/meshcontroller/spec"
+	"github.com/megaease/easegress/v2/pkg/api"
+	"github.com/megaease/easegress/v2/pkg/logger"
+	"github.com/megaease/easegress/v2/pkg/object/meshcontroller/spec"
+	"github.com/megaease/easegress/v2/pkg/util/codectool"
 )
 
 type ingressesByOrder []*spec.Ingress
@@ -37,7 +38,7 @@ func (s ingressesByOrder) Less(i, j int) bool { return s[i].Name < s[j].Name }
 func (s ingressesByOrder) Len() int           { return len(s) }
 func (s ingressesByOrder) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
-func (a *API) readIngressName(w http.ResponseWriter, r *http.Request) (string, error) {
+func (a *API) readIngressName(r *http.Request) (string, error) {
 	serviceName := chi.URLParam(r, "ingressName")
 	if serviceName == "" {
 		return "", fmt.Errorf("empty ingress name")
@@ -50,9 +51,9 @@ func (a *API) listIngresses(w http.ResponseWriter, r *http.Request) {
 	specs := a.service.ListIngressSpecs()
 
 	sort.Sort(ingressesByOrder(specs))
-	var apiSpecs []*v1alpha1.Ingress
+	apiSpecs := make([]*v2alpha1.Ingress, 0, len(specs))
 	for _, v := range specs {
-		ingress := &v1alpha1.Ingress{}
+		ingress := &v2alpha1.Ingress{}
 		err := a.convertSpecToPB(v, ingress)
 		if err != nil {
 			logger.Errorf("convert spec %#v to pb spec failed: %v", v, err)
@@ -60,52 +61,38 @@ func (a *API) listIngresses(w http.ResponseWriter, r *http.Request) {
 		}
 		apiSpecs = append(apiSpecs, ingress)
 	}
-	buff, err := json.Marshal(apiSpecs)
-	if err != nil {
-		panic(fmt.Errorf("marshal %#v to json failed: %v", specs, err))
-	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(buff)
+	buff := codectool.MustMarshalJSON(apiSpecs)
+	a.writeJSONBody(w, buff)
 }
 
 func (a *API) createIngress(w http.ResponseWriter, r *http.Request) {
-	pbIngressSpec := &v1alpha1.Ingress{}
+	pbIngressSpec := &v2alpha1.Ingress{}
 	ingressSpec := &spec.Ingress{}
 
-	ingressName, err := a.readIngressName(w, r)
+	err := a.readAPISpec(r, pbIngressSpec, ingressSpec)
 	if err != nil {
 		api.HandleAPIError(w, r, http.StatusBadRequest, err)
-		return
-	}
-	err = a.readAPISpec(w, r, pbIngressSpec, ingressSpec)
-	if err != nil {
-		api.HandleAPIError(w, r, http.StatusBadRequest, err)
-		return
-	}
-	if ingressName != ingressSpec.Name {
-		api.HandleAPIError(w, r, http.StatusBadRequest,
-			fmt.Errorf("name conflict: %s %s", ingressName, ingressSpec.Name))
 		return
 	}
 
 	a.service.Lock()
 	defer a.service.Unlock()
 
-	oldSpec := a.service.GetIngressSpec(ingressName)
+	oldSpec := a.service.GetIngressSpec(ingressSpec.Name)
 	if oldSpec != nil {
-		api.HandleAPIError(w, r, http.StatusConflict, fmt.Errorf("%s existed", ingressName))
+		api.HandleAPIError(w, r, http.StatusConflict, fmt.Errorf("%s existed", ingressSpec.Name))
 		return
 	}
 
 	a.service.PutIngressSpec(ingressSpec)
 
-	w.Header().Set("Location", r.URL.Path)
+	w.Header().Set("Location", path.Join(r.URL.Path, ingressSpec.Name))
 	w.WriteHeader(http.StatusCreated)
 }
 
 func (a *API) getIngress(w http.ResponseWriter, r *http.Request) {
-	ingressName, err := a.readIngressName(w, r)
+	ingressName, err := a.readIngressName(r)
 	if err != nil {
 		api.HandleAPIError(w, r, http.StatusBadRequest, err)
 		return
@@ -116,31 +103,26 @@ func (a *API) getIngress(w http.ResponseWriter, r *http.Request) {
 		api.HandleAPIError(w, r, http.StatusNotFound, fmt.Errorf("%s not found", ingressName))
 		return
 	}
-	pbIngressSpec := &v1alpha1.Ingress{}
+	pbIngressSpec := &v2alpha1.Ingress{}
 	err = a.convertSpecToPB(ingressSpec, pbIngressSpec)
 	if err != nil {
 		panic(fmt.Errorf("convert spec %#v to pb failed: %v", ingressSpec, err))
 	}
 
-	buff, err := json.Marshal(pbIngressSpec)
-	if err != nil {
-		panic(fmt.Errorf("marshal %#v to json failed: %v", pbIngressSpec, err))
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(buff)
+	buff := codectool.MustMarshalJSON(pbIngressSpec)
+	a.writeJSONBody(w, buff)
 }
 
 func (a *API) updateIngress(w http.ResponseWriter, r *http.Request) {
-	pbIngressSpec := &v1alpha1.Ingress{}
+	pbIngressSpec := &v2alpha1.Ingress{}
 	ingressSpec := &spec.Ingress{}
 
-	ingressName, err := a.readIngressName(w, r)
+	ingressName, err := a.readIngressName(r)
 	if err != nil {
 		api.HandleAPIError(w, r, http.StatusBadRequest, err)
 		return
 	}
-	err = a.readAPISpec(w, r, pbIngressSpec, ingressSpec)
+	err = a.readAPISpec(r, pbIngressSpec, ingressSpec)
 	if err != nil {
 		api.HandleAPIError(w, r, http.StatusBadRequest, err)
 		return
@@ -164,7 +146,7 @@ func (a *API) updateIngress(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) deleteIngress(w http.ResponseWriter, r *http.Request) {
-	ingressName, err := a.readIngressName(w, r)
+	ingressName, err := a.readIngressName(r)
 	if err != nil {
 		api.HandleAPIError(w, r, http.StatusBadRequest, err)
 		return

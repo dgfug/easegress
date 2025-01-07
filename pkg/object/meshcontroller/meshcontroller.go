@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,17 +15,21 @@
  * limitations under the License.
  */
 
+// Package meshcontroller provides the service mesh controller.
 package meshcontroller
 
 import (
-	"github.com/megaease/easegress/pkg/logger"
-	"github.com/megaease/easegress/pkg/object/meshcontroller/api"
-	"github.com/megaease/easegress/pkg/object/meshcontroller/ingresscontroller"
-	"github.com/megaease/easegress/pkg/object/meshcontroller/label"
-	"github.com/megaease/easegress/pkg/object/meshcontroller/master"
-	"github.com/megaease/easegress/pkg/object/meshcontroller/spec"
-	"github.com/megaease/easegress/pkg/object/meshcontroller/worker"
-	"github.com/megaease/easegress/pkg/supervisor"
+	"strings"
+
+	egapi "github.com/megaease/easegress/v2/pkg/api"
+	"github.com/megaease/easegress/v2/pkg/logger"
+	"github.com/megaease/easegress/v2/pkg/object/meshcontroller/api"
+	"github.com/megaease/easegress/v2/pkg/object/meshcontroller/ingresscontroller"
+	"github.com/megaease/easegress/v2/pkg/object/meshcontroller/label"
+	"github.com/megaease/easegress/v2/pkg/object/meshcontroller/master"
+	"github.com/megaease/easegress/v2/pkg/object/meshcontroller/spec"
+	"github.com/megaease/easegress/v2/pkg/object/meshcontroller/worker"
+	"github.com/megaease/easegress/v2/pkg/supervisor"
 )
 
 const (
@@ -36,8 +40,18 @@ const (
 	Kind = "MeshController"
 )
 
+func init() {
+	supervisor.Register(&MeshController{})
+	egapi.RegisterObject(&egapi.APIResource{
+		Category: Category,
+		Kind:     Kind,
+		Name:     strings.ToLower(Kind),
+		Aliases:  []string{"mesh", "meshcontrollers"},
+	})
+}
+
 type (
-	// MeshController is a business controller to complete MegaEase Service Mesh.
+	// MeshController is a business controller to complete EaseMesh.
 	MeshController struct {
 		superSpec *supervisor.Spec
 		spec      *spec.Admin
@@ -50,10 +64,6 @@ type (
 		ingressController *ingresscontroller.IngressController
 	}
 )
-
-func init() {
-	supervisor.Register(&MeshController{})
-}
 
 // Category returns the category of MeshController.
 func (mc *MeshController) Category() supervisor.ObjectCategory {

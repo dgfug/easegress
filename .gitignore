@@ -24,6 +24,13 @@ member
 # goreleaser
 dist/
 
+# golang build cache for docker
+build/cache
+build/bin
+
 easegress.pid
+running_objects*.json
 
 *.exe
+
+nacos/

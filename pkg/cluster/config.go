@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,14 +18,14 @@
 package cluster
 
 import (
-	"fmt"
 	"net/url"
 	"path/filepath"
 
 	"go.etcd.io/etcd/server/v3/embed"
 
-	"github.com/megaease/easegress/pkg/common"
-	"github.com/megaease/easegress/pkg/logger"
+	"github.com/megaease/easegress/v2/pkg/common"
+	"github.com/megaease/easegress/v2/pkg/logger"
+	"github.com/megaease/easegress/v2/pkg/option"
 )
 
 const (
@@ -39,6 +39,10 @@ const (
 
 	maxTxnOps       = 10240
 	maxRequestBytes = 10 * 1024 * 1024 // 10MB
+
+	// Threshold for number of changes etcd stores in memory before creating a new snapshot.
+	// Reference: https://etcd.io/docs/v3.5/tuning/#snapshot-tuning
+	snapshotCount = 5000
 )
 
 var (
@@ -46,9 +50,10 @@ var (
 	autoCompactionMode      = embed.CompactorModeRevision
 )
 
-func (c *cluster) prepareEtcdConfig() (*embed.Config, error) {
+// CreateStaticClusterEtcdConfig creates an embedded etcd config for static sized cluster,
+// listing all cluster members for etcd's initial-cluster argument.
+func CreateStaticClusterEtcdConfig(opt *option.Options) (*embed.Config, error) {
 	ec := embed.NewConfig()
-	opt := c.opt
 
 	var (
 		clientURLs   []url.URL
@@ -56,33 +61,21 @@ func (c *cluster) prepareEtcdConfig() (*embed.Config, error) {
 		clientAdURLs []url.URL
 		peerAdURLs   []url.URL
 	)
-	for _, u := range opt.ClusterListenClientURLs {
-		clientURL, err := url.Parse(u)
-		if err != nil {
-			return nil, err
-		}
-		clientURLs = append(clientURLs, *clientURL)
+	clientURLs, err := option.ParseURLs(opt.Cluster.ListenClientURLs)
+	if err != nil {
+		return nil, err
 	}
-	for _, u := range opt.ClusterListenPeerURLs {
-		peerURL, err := url.Parse(u)
-		if err != nil {
-			return nil, err
-		}
-		peerURLs = append(peerURLs, *peerURL)
+	peerURLs, err = option.ParseURLs(opt.Cluster.ListenPeerURLs)
+	if err != nil {
+		return nil, err
 	}
-	for _, u := range opt.ClusterAdvertiseClientURLs {
-		clientAdURL, err := url.Parse(u)
-		if err != nil {
-			return nil, err
-		}
-		clientAdURLs = append(clientAdURLs, *clientAdURL)
+	clientAdURLs, err = option.ParseURLs(opt.Cluster.AdvertiseClientURLs)
+	if err != nil {
+		return nil, err
 	}
-	for _, u := range opt.ClusterInitialAdvertisePeerURLs {
-		peerAdURL, err := url.Parse(u)
-		if err != nil {
-			return nil, err
-		}
-		peerAdURLs = append(peerAdURLs, *peerAdURL)
+	peerAdURLs, err = option.ParseURLs(opt.Cluster.InitialAdvertisePeerURLs)
+	if err != nil {
+		return nil, err
 	}
 
 	ec.Name = opt.Name
@@ -91,38 +84,31 @@ func (c *cluster) prepareEtcdConfig() (*embed.Config, error) {
 	ec.WalDir = opt.AbsWALDir
 	ec.InitialClusterToken = opt.ClusterName
 	ec.EnableV2 = false
-	ec.LCUrls = clientURLs
-	ec.ACUrls = clientAdURLs
-	ec.LPUrls = peerURLs
-	ec.APUrls = peerAdURLs
+	ec.ListenClientUrls = clientURLs
+	ec.AdvertiseClientUrls = clientAdURLs
+	ec.ListenPeerUrls = peerURLs
+	ec.AdvertisePeerUrls = peerAdURLs
 	ec.AutoCompactionMode = autoCompactionMode
 	ec.AutoCompactionRetention = autoCompactionRetention
 	ec.QuotaBackendBytes = quotaBackendBytes
 	ec.MaxTxnOps = maxTxnOps
 	ec.MaxRequestBytes = maxRequestBytes
+	ec.SnapshotCount = snapshotCount
 	ec.Logger = "zap"
-	ec.LogOutputs = []string{common.NormalizeZapLogPath(filepath.Join(opt.AbsLogDir, logFilename))}
 
-	ec.ClusterState = embed.ClusterStateFlagExisting
-	if c.opt.ForceNewCluster {
-		ec.ClusterState = embed.ClusterStateFlagNew
-		ec.ForceNewCluster = true
-		self := c.members.self()
-		ec.InitialCluster = fmt.Sprintf("%s=%s", self.Name, self.PeerURL)
-	} else {
-		if len(c.opt.ClusterJoinURLs) == 0 {
-			if c.members.clusterMembersLen() == 1 &&
-				common.IsDirEmpty(c.opt.AbsDataDir) {
-				ec.ClusterState = embed.ClusterStateFlagNew
-			}
-		} else if c.members.clusterMembersLen() == 1 {
-			return nil, fmt.Errorf("join mode with only one cluster member: %v",
-				*c.members.ClusterMembers)
-		}
-		ec.InitialCluster = c.members.initCluster()
+	ec.LogOutputs = []string{"stdout"}
+	if opt.AbsLogDir != "" {
+		ec.LogOutputs = []string{common.NormalizeZapLogPath(filepath.Join(opt.AbsLogDir, logFilename))}
 	}
 
-	logger.Infof("etcd config: init-cluster:%s cluster-state:%s force-new-cluster:%v",
+	ec.ClusterState = embed.ClusterStateFlagNew
+	if opt.Cluster.StateFlag == "existing" {
+		ec.ClusterState = embed.ClusterStateFlagExisting
+	}
+	ec.InitialCluster = opt.InitialClusterToString()
+
+	logger.Infof("etcd config: advertise-client-urls: %+v advertise-peer-urls: %+v init-cluster: %s cluster-state: %s force-new-cluster: %v",
+		ec.AdvertiseClientUrls, ec.AdvertisePeerUrls,
 		ec.InitialCluster, ec.ClusterState, ec.ForceNewCluster)
 
 	return ec, nil

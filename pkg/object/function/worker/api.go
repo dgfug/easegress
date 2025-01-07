@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,17 +19,17 @@ package worker
 
 import (
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"gopkg.in/yaml.v2"
 
-	"github.com/megaease/easegress/pkg/api"
-	"github.com/megaease/easegress/pkg/logger"
-	"github.com/megaease/easegress/pkg/object/function/spec"
-	"github.com/megaease/easegress/pkg/object/function/storage"
-	"github.com/megaease/easegress/pkg/v"
+	"github.com/megaease/easegress/v2/pkg/api"
+	"github.com/megaease/easegress/v2/pkg/logger"
+	"github.com/megaease/easegress/v2/pkg/object/function/spec"
+	"github.com/megaease/easegress/v2/pkg/object/function/storage"
+	"github.com/megaease/easegress/v2/pkg/util/codectool"
+	"github.com/megaease/easegress/v2/pkg/v"
 )
 
 var (
@@ -120,13 +120,13 @@ func (worker *Worker) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (worker *Worker) readAPISpec(w http.ResponseWriter, r *http.Request, spec interface{}) error {
-	body, err := ioutil.ReadAll(r.Body)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		return fmt.Errorf("read body failed: %v", err)
 	}
-	err = yaml.Unmarshal(body, spec)
+	err = codectool.Unmarshal(body, spec)
 	if err != nil {
-		return fmt.Errorf("unmarshal failed: %v", err)
+		return fmt.Errorf("unmarshal to json failed: %v", err)
 	}
 
 	vr := v.Validate(spec)
@@ -158,7 +158,11 @@ func (worker *Worker) updateState(w http.ResponseWriter, r *http.Request, event 
 	if !stateUpdated {
 		return
 	}
-	worker.store.Lock()
+	err = worker.store.Lock()
+	if err != nil {
+		api.HandleAPIError(w, r, http.StatusInternalServerError, err)
+		return
+	}
 	defer worker.store.Unlock()
 	err = worker.updateFunctionStatus(function.Status)
 	if err != nil {
@@ -206,7 +210,11 @@ func (worker *Worker) Delete(w http.ResponseWriter, r *http.Request) {
 		api.HandleAPIError(w, r, http.StatusBadRequest, err)
 		return
 	}
-	worker.Lock()
+	err = worker.Lock()
+	if err != nil {
+		api.HandleAPIError(w, r, http.StatusInternalServerError, err)
+		return
+	}
 	defer worker.Unlock()
 
 	// delete function in FaaS Provider
@@ -234,13 +242,13 @@ func (worker *Worker) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	buff, err := yaml.Marshal(functions)
+	buff, err := codectool.MarshalJSON(functions)
 	if err != nil {
-		api.HandleAPIError(w, r, http.StatusBadRequest, fmt.Errorf("marshal %#v to yaml failed: %v", functions, err))
+		api.HandleAPIError(w, r, http.StatusBadRequest, fmt.Errorf("marshal %#v to json failed: %v", functions, err))
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/vnd.yaml")
+	w.Header().Set("Content-Type", "application/json")
 	w.Write(buff)
 }
 
@@ -312,14 +320,16 @@ func (worker *Worker) Get(w http.ResponseWriter, r *http.Request) {
 		logger.Errorf("create function with bad request: %v", err)
 		return
 	}
+
 	// no display
 	function.Fsm = nil
-	buff, err := yaml.Marshal(function)
+
+	buff, err := codectool.MarshalJSON(function)
 	if err != nil {
-		api.HandleAPIError(w, r, http.StatusBadRequest, fmt.Errorf("marshal %#v to yaml failed: %v", function, err))
+		api.HandleAPIError(w, r, http.StatusBadRequest, fmt.Errorf("marshal %#v to json failed: %v", function, err))
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/vnd.yaml")
+	w.Header().Set("Content-Type", "application/json")
 	w.Write(buff)
 }

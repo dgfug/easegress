@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,28 +15,29 @@
  * limitations under the License.
  */
 
+// Package pathadaptor provides a path adaptor.
 package pathadaptor
 
 import (
 	"regexp"
 	"strings"
 
-	"github.com/megaease/easegress/pkg/logger"
+	"github.com/megaease/easegress/v2/pkg/logger"
 )
 
 type (
 	// Spec describes rules for PathAdaptor.
 	Spec struct {
-		Replace       string         `yaml:"replace,omitempty" jsonschema:"omitempty"`
-		AddPrefix     string         `yaml:"addPrefix,omitempty" jsonschema:"omitempty,pattern=^/"`
-		TrimPrefix    string         `yaml:"trimPrefix,omitempty" jsonschema:"omitempty,pattern=^/"`
-		RegexpReplace *RegexpReplace `yaml:"regexpReplace,omitempty" jsonschema:"omitempty"`
+		Replace       string         `json:"replace,omitempty"`
+		AddPrefix     string         `json:"addPrefix,omitempty" jsonschema:"pattern=^/"`
+		TrimPrefix    string         `json:"trimPrefix,omitempty" jsonschema:"pattern=^/"`
+		RegexpReplace *RegexpReplace `json:"regexpReplace,omitempty"`
 	}
 
 	// RegexpReplace use regexp-replace pair to rewrite path.
 	RegexpReplace struct {
-		Regexp  string `yaml:"regexp" jsonschema:"required,format=regexp"`
-		Replace string `yaml:"replace"`
+		Regexp  string `json:"regexp" jsonschema:"required,format=regexp"`
+		Replace string `json:"replace"`
 
 		re *regexp.Regexp
 	}

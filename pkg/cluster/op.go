@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,8 +18,11 @@
 package cluster
 
 import (
+	"time"
+
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/client/v3/concurrency"
 )
 
 // PutUnderLease stores data under lease.
@@ -36,8 +39,9 @@ func (c *cluster) PutUnderLease(key, value string) error {
 		return err
 	}
 
-	_, err = client.Put(c.requestContext(), key, value, clientv3.WithLease(lease))
-
+	ctx, cancel := c.requestContext()
+	defer cancel()
+	_, err = client.Put(ctx, key, value, clientv3.WithLease(lease))
 	return err
 }
 
@@ -47,8 +51,9 @@ func (c *cluster) Put(key, value string) error {
 		return err
 	}
 
-	_, err = client.Put(c.requestContext(), key, value)
-
+	ctx, cancel := c.requestContext()
+	defer cancel()
+	_, err = client.Put(ctx, key, value)
 	return err
 }
 
@@ -84,8 +89,9 @@ func (c *cluster) putAndDelete(kvs map[string]*string, underLease bool) error {
 		}
 	}
 
-	_, err = client.Txn(c.requestContext()).Then(ops...).Commit()
-
+	ctx, cancel := c.requestContext()
+	defer cancel()
+	_, err = client.Txn(ctx).Then(ops...).Commit()
 	return err
 }
 
@@ -95,8 +101,9 @@ func (c *cluster) Delete(key string) error {
 		return err
 	}
 
-	_, err = client.Delete(c.requestContext(), key)
-
+	ctx, cancel := c.requestContext()
+	defer cancel()
+	_, err = client.Delete(ctx, key)
 	return err
 }
 
@@ -106,8 +113,9 @@ func (c *cluster) DeletePrefix(prefix string) error {
 		return err
 	}
 
-	_, err = client.Delete(c.requestContext(), prefix, clientv3.WithPrefix())
-
+	ctx, cancel := c.requestContext()
+	defer cancel()
+	_, err = client.Delete(ctx, prefix, clientv3.WithPrefix())
 	return err
 }
 
@@ -128,7 +136,9 @@ func (c *cluster) GetRaw(key string) (*mvccpb.KeyValue, error) {
 		return nil, err
 	}
 
-	resp, err := client.Get(c.requestContext(), key)
+	ctx, cancel := c.requestContext()
+	defer cancel()
+	resp, err := client.Get(ctx, key)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +172,11 @@ func (c *cluster) GetRawPrefix(prefix string) (map[string]*mvccpb.KeyValue, erro
 		return kvs, err
 	}
 
-	resp, err := client.Get(c.requestContext(), prefix, clientv3.WithPrefix())
+	resp, err := func() (*clientv3.GetResponse, error) {
+		ctx, cancel := c.requestContext()
+		defer cancel()
+		return client.Get(ctx, prefix, clientv3.WithPrefix())
+	}()
 	if err != nil {
 		return kvs, err
 	}
@@ -172,4 +186,57 @@ func (c *cluster) GetRawPrefix(prefix string) (map[string]*mvccpb.KeyValue, erro
 	}
 
 	return kvs, nil
+}
+
+func (c *cluster) GetWithOp(key string, op ...ClientOp) (map[string]string, error) {
+	kvs := make(map[string]string)
+
+	client, err := c.getClient()
+	if err != nil {
+		return kvs, err
+	}
+
+	newOps := []clientv3.OpOption{}
+	for _, o := range op {
+		if opOption := getOpOption(o); opOption != nil {
+			newOps = append(newOps, opOption)
+		}
+	}
+
+	resp, err := func() (*clientv3.GetResponse, error) {
+		ctx, cancel := c.requestContext()
+		defer cancel()
+		return client.Get(ctx, key, newOps...)
+	}()
+	if err != nil {
+		return kvs, err
+	}
+	for _, kv := range resp.Kvs {
+		kvs[string(kv.Key)] = string(kv.Value)
+	}
+	return kvs, nil
+}
+
+func (c *cluster) STM(apply func(concurrency.STM) error) error {
+	client, err := c.getClient()
+	if err != nil {
+		return err
+	}
+	_, err = concurrency.NewSTM(client, apply)
+	return err
+}
+
+func (c *cluster) PutUnderTimeout(key, value string, timeout time.Duration) error {
+	client, err := c.getClient()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := c.requestContext()
+	defer cancel()
+	lgr, err := client.Lease.Grant(ctx, int64(timeout.Seconds()))
+	if err != nil {
+		return err
+	}
+	_, err = client.Put(ctx, key, value, clientv3.WithLease(lgr.ID))
+	return err
 }

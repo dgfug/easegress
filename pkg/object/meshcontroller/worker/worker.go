@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,29 +15,33 @@
  * limitations under the License.
  */
 
+// Package worker provides the worker for mesh controller.
 package worker
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/url"
 	"os"
 	"runtime/debug"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"gopkg.in/yaml.v2"
-
-	"github.com/megaease/easegress/pkg/logger"
-	"github.com/megaease/easegress/pkg/object/meshcontroller/informer"
-	"github.com/megaease/easegress/pkg/object/meshcontroller/label"
-	"github.com/megaease/easegress/pkg/object/meshcontroller/layout"
-	"github.com/megaease/easegress/pkg/object/meshcontroller/registrycenter"
-	"github.com/megaease/easegress/pkg/object/meshcontroller/service"
-	"github.com/megaease/easegress/pkg/object/meshcontroller/spec"
-	"github.com/megaease/easegress/pkg/object/meshcontroller/storage"
-	"github.com/megaease/easegress/pkg/supervisor"
+	"github.com/megaease/easegress/v2/pkg/logger"
+	"github.com/megaease/easegress/v2/pkg/object/meshcontroller/informer"
+	"github.com/megaease/easegress/v2/pkg/object/meshcontroller/label"
+	"github.com/megaease/easegress/v2/pkg/object/meshcontroller/layout"
+	"github.com/megaease/easegress/v2/pkg/object/meshcontroller/registrycenter"
+	"github.com/megaease/easegress/v2/pkg/object/meshcontroller/service"
+	"github.com/megaease/easegress/v2/pkg/object/meshcontroller/spec"
+	"github.com/megaease/easegress/v2/pkg/object/meshcontroller/storage"
+	"github.com/megaease/easegress/v2/pkg/supervisor"
+	"github.com/megaease/easegress/v2/pkg/util/codectool"
+	"github.com/megaease/easegress/v2/pkg/util/jmxtool"
+	"github.com/megaease/easegress/v2/pkg/util/stringtool"
 )
 
 type (
@@ -60,6 +64,7 @@ type (
 		service  *service.Service
 		informer informer.Informer
 
+		registryType         string
 		registryServer       *registrycenter.Server
 		ingressServer        *IngressServer
 		egressServer         *EgressServer
@@ -70,66 +75,66 @@ type (
 	}
 )
 
-const (
-	// from k8s pod's env value
-	podEnvHostname      = "HOSTNAME"
-	podEnvApplicationIP = "APPLICATION_IP"
-)
-
-func decodeLables(lables string) map[string]string {
-	mLabels := make(map[string]string)
-	if len(lables) == 0 {
-		return mLabels
-	}
-	strLabel, err := url.QueryUnescape(lables)
-	if err != nil {
-		logger.Errorf("query unescape: %s failed: %v ", lables, err)
-		return mLabels
+func decodeLabels(labelStr string) map[string]string {
+	labelMap := make(map[string]string)
+	if len(labelStr) == 0 {
+		return labelMap
 	}
 
-	arrLabel := strings.Split(strLabel, "&")
+	labelSlice := strings.Split(labelStr, ",")
 
-	for _, v := range arrLabel {
+	for _, v := range labelSlice {
 		kv := strings.Split(v, "=")
 		if len(kv) == 2 {
-			mLabels[kv[0]] = kv[1]
+			labelMap[kv[0]] = kv[1]
 		} else {
-			logger.Errorf("serviceLabel: %s invalid format: %s", strLabel, v)
+			logger.Errorf("%s: invalid label: %s", labelStr, v)
 		}
 	}
-	return mLabels
+
+	return labelMap
 }
 
 // New creates a mesh worker.
 func New(superSpec *supervisor.Spec) *Worker {
 	super := superSpec.Super()
-	spec := superSpec.ObjectSpec().(*spec.Admin)
+	_spec := superSpec.ObjectSpec().(*spec.Admin)
 	serviceName := super.Options().Labels[label.KeyServiceName]
 	aliveProbe := super.Options().Labels[label.KeyAliveProbe]
-	serviceLabels := decodeLables(super.Options().Labels[label.KeyServiceLables])
+	serviceLabels := decodeLabels(super.Options().Labels[label.KeyServiceLabels])
 	applicationPort, err := strconv.Atoi(super.Options().Labels[label.KeyApplicationPort])
 	if err != nil {
 		logger.Errorf("parse %s failed: %v", super.Options().Labels[label.KeyApplicationPort], err)
 	}
 
-	instanceID := os.Getenv(podEnvHostname)
-	applicationIP := os.Getenv(podEnvApplicationIP)
+	instanceID := os.Getenv(spec.PodEnvHostname)
+	applicationIP := os.Getenv(spec.PodEnvApplicationIP)
 	store := storage.New(superSpec.Name(), super.Cluster())
 	_service := service.New(superSpec)
-	registryCenterServer := registrycenter.NewRegistryCenterServer(spec.RegistryType,
-		serviceName, applicationIP, applicationPort, instanceID, serviceLabels, _service)
 
-	inf := informer.NewInformer(store, serviceName)
-	ingressServer := NewIngressServer(superSpec, super, serviceName, inf)
-	egressServer := NewEgressServer(superSpec, super, serviceName, _service, inf)
-
+	_informer := informer.NewInformer(store, serviceName)
 	observabilityManager := NewObservabilityServer(serviceName)
-	apiServer := newAPIServer(spec.APIPort)
+	instanceSpec := &spec.ServiceInstanceSpec{
+		RegistryName: superSpec.Name(),
+		ServiceName:  serviceName,
+		InstanceID:   instanceID,
+		IP:           applicationIP,
+		// Port is assigned when registered.
+		Labels: serviceLabels,
+	}
+
+	registryCenterServer := registrycenter.NewRegistryCenterServer(_spec.RegistryType,
+		instanceSpec, _service, _informer, observabilityManager.agentClient)
+
+	ingressServer := NewIngressServer(superSpec, super, serviceName, instanceID, _service)
+	egressServer := NewEgressServer(superSpec, super, serviceName, instanceID, _service)
+
+	apiServer := newAPIServer(_spec.APIPort)
 
 	worker := &Worker{
 		super:     super,
 		superSpec: superSpec,
-		spec:      spec,
+		spec:      _spec,
 
 		serviceName:     serviceName,
 		instanceID:      instanceID, // instanceID will be the pod ID valued by HOSTNAME env.
@@ -140,8 +145,9 @@ func New(superSpec *supervisor.Spec) *Worker {
 
 		store:    store,
 		service:  _service,
-		informer: inf,
+		informer: _informer,
 
+		registryType:         _spec.RegistryType,
 		registryServer:       registryCenterServer,
 		ingressServer:        ingressServer,
 		egressServer:         egressServer,
@@ -158,43 +164,53 @@ func New(superSpec *supervisor.Spec) *Worker {
 	return worker
 }
 
-func (worker *Worker) run() {
+func (worker *Worker) validate() error {
 	var err error
 	worker.heartbeatInterval, err = time.ParseDuration(worker.spec.HeartbeatInterval)
 	if err != nil {
 		logger.Errorf("BUG: parse heartbeat interval: %s failed: %v",
 			worker.spec.HeartbeatInterval, err)
-		return
+		return err
 	}
 
 	if len(worker.serviceName) == 0 {
-		logger.Errorf("mesh service name is empty")
-		return
+		errMsg := "empty service name"
+		logger.Errorf(errMsg)
+		return fmt.Errorf(errMsg)
 	}
-	logger.Infof("%s works for service %s", worker.serviceName)
 
 	_, err = url.ParseRequestURI(worker.aliveProbe)
 	if err != nil {
 		logger.Errorf("parse alive probe: %s to url failed: %v", worker.aliveProbe, err)
-		return
+		return err
 	}
 
 	if worker.applicationPort == 0 {
-		logger.Errorf("empty application port")
-		return
+		errMsg := "empty application port"
+		logger.Errorf(errMsg)
+		return fmt.Errorf(errMsg)
 	}
 
 	if len(worker.instanceID) == 0 {
-		logger.Errorf("empty env HOSTNAME")
-		return
+		errMsg := "empty env HOSTNAME"
+		logger.Errorf(errMsg)
+		return fmt.Errorf(errMsg)
 	}
 
 	if len(worker.applicationIP) == 0 {
-		logger.Errorf("empty env APPLICATION_IP")
+		errMsg := "empty env APPLICATION_IP"
+		logger.Errorf(errMsg)
+		return fmt.Errorf(errMsg)
+	}
+	logger.Infof("sidecar works for service: %s", worker.serviceName)
+	return nil
+}
+
+func (worker *Worker) run() {
+	if err := worker.validate(); err != nil {
 		return
 	}
-
-	startUpRoutine := func() {
+	startUpRoutine := func() bool {
 		defer func() {
 			if err := recover(); err != nil {
 				logger.Errorf("%s: recover from: %v, stack trace:\n%s\n",
@@ -202,7 +218,10 @@ func (worker *Worker) run() {
 			}
 		}()
 
-		serviceSpec, info := worker.service.GetServiceSpecWithInfo(worker.serviceName)
+		serviceSpec := worker.service.GetServiceSpec(worker.serviceName)
+		if serviceSpec == nil {
+			return false
+		}
 
 		err := worker.initTrafficGate()
 		if err != nil {
@@ -211,19 +230,19 @@ func (worker *Worker) run() {
 
 		worker.registryServer.Register(serviceSpec, worker.ingressServer.Ready, worker.egressServer.Ready)
 
-		err = worker.observabilityManager.UpdateService(serviceSpec, info.Version)
-		if err != nil {
-			logger.Errorf("update service %s failed: %v", serviceSpec.Name, err)
-		}
+		return true
 	}
 
-	startUpRoutine()
+	if runnable := startUpRoutine(); !runnable {
+		logger.Errorf("service: %s is not runnable, please check the service spec", worker.superSpec.Name())
+		return
+	}
 	go worker.heartbeat()
-	go worker.pushSpecToJavaAgent()
+	go worker.updateAgentConfig()
 }
 
 func (worker *Worker) heartbeat() {
-	inforJavaAgentReady, trafficGateReady := false, false
+	trafficGateReady := false
 
 	routine := func() {
 		defer func() {
@@ -243,16 +262,7 @@ func (worker *Worker) heartbeat() {
 		}
 
 		if worker.registryServer.Registered() {
-			if !inforJavaAgentReady {
-				err := worker.informJavaAgent()
-				if err != nil {
-					logger.Errorf(err.Error())
-				} else {
-					inforJavaAgentReady = true
-				}
-			}
-
-			err := worker.updateHearbeat()
+			err := worker.updateHeartbeat()
 			if err != nil {
 				logger.Errorf("update heartbeat failed: %v", err)
 			}
@@ -269,7 +279,7 @@ func (worker *Worker) heartbeat() {
 	}
 }
 
-func (worker *Worker) pushSpecToJavaAgent() {
+func (worker *Worker) updateAgentConfig() {
 	routine := func() {
 		defer func() {
 			if err := recover(); err != nil {
@@ -278,26 +288,68 @@ func (worker *Worker) pushSpecToJavaAgent() {
 			}
 		}()
 
-		serviceSpec, info := worker.service.GetServiceSpecWithInfo(worker.serviceName)
-		err := worker.observabilityManager.UpdateService(serviceSpec, info.Version)
-		if err != nil {
-			logger.Errorf("update service %s failed: %v", serviceSpec.Name, err)
+		decodeBase64 := func(s string) string {
+			result, err := base64.StdEncoding.DecodeString(s)
+			if err != nil {
+				panic(err)
+			}
+
+			return string(result)
 		}
 
-		globalCanaryHeaders, info := worker.service.GetGlobalCanaryHeadersWithInfo()
-		if globalCanaryHeaders != nil {
-			err := worker.observabilityManager.UpdateCanary(globalCanaryHeaders, info.Version)
-			if err != nil {
-				logger.Errorf("update canary failed: %v", err)
+		agentConfig := &jmxtool.AgentConfig{}
+
+		serviceSpec := worker.service.GetServiceSpec(worker.serviceName)
+		agentConfig.Service = *serviceSpec
+
+		canaries := worker.service.ListServiceCanaries()
+		headersMap := map[string]struct{}{spec.ServiceCanaryHeaderKey: {}}
+		for _, canary := range canaries {
+			for key := range canary.TrafficRules.Headers {
+				headersMap[key] = struct{}{}
 			}
 		}
+		canaryHeaders := []string{}
+		for key := range headersMap {
+			canaryHeaders = append(canaryHeaders, key)
+		}
+		sort.Strings(canaryHeaders)
+		agentConfig.Headers = strings.Join(canaryHeaders, ",")
+
+		if worker.spec.MonitorMTLS != nil && worker.spec.MonitorMTLS.Enabled {
+			for _, monitorCert := range worker.spec.MonitorMTLS.Certs {
+				if stringtool.StrInSlice(worker.serviceName, monitorCert.Services) {
+					reporterType := worker.spec.MonitorMTLS.ReporterAppendType
+					if reporterType == "" {
+						reporterType = "http"
+					}
+					agentConfig.Reporter = &jmxtool.AgentReporter{
+						ReporterTLS: &jmxtool.AgentReporterTLS{
+							Enable: true,
+							CACert: decodeBase64(worker.spec.MonitorMTLS.CaCertBase64),
+							Cert:   decodeBase64(monitorCert.CertBase64),
+							Key:    decodeBase64(monitorCert.KeyBase64),
+						},
+						AppendType:      reporterType,
+						BootstrapServer: worker.spec.MonitorMTLS.URL,
+						Username:        worker.spec.MonitorMTLS.Username,
+						Password:        worker.spec.MonitorMTLS.Password,
+					}
+					break
+				}
+			}
+		}
+
+		worker.observabilityManager.agentClient.UpdateAgentConfig(agentConfig)
 	}
+
+	routine()
 
 	for {
 		select {
 		case <-worker.done:
 			return
-		case <-time.After(1 * time.Minute):
+		case <-time.After(30 * time.Second):
 			routine()
 		}
 	}
@@ -321,7 +373,7 @@ func (worker *Worker) initTrafficGate() error {
 	return nil
 }
 
-func (worker *Worker) updateHearbeat() error {
+func (worker *Worker) updateHeartbeat() error {
 	resp, err := http.Get(worker.aliveProbe)
 	if err != nil {
 		return fmt.Errorf("probe: %s check service: %s instanceID: %s heartbeat failed: %v",
@@ -344,45 +396,23 @@ func (worker *Worker) updateHearbeat() error {
 		InstanceID:  worker.instanceID,
 	}
 	if value != nil {
-		err := yaml.Unmarshal([]byte(*value), status)
+		err := codectool.Unmarshal([]byte(*value), status)
 		if err != nil {
-			logger.Errorf("BUG: unmarshal %s to yaml failed: %v", *value, err)
+			logger.Errorf("BUG: unmarshal %s to json failed: %v", *value, err)
 
-			// NOTE: This is a little strict, maybe we could use the brand new status to udpate.
+			// NOTE: This is a little strict, maybe we could use the brand new status to update.
 			return err
 		}
 	}
 
 	status.LastHeartbeatTime = time.Now().Format(time.RFC3339)
-	buff, err := yaml.Marshal(status)
+	buff, err := codectool.MarshalJSON(status)
 	if err != nil {
-		logger.Errorf("BUG: marshal %#v to yaml failed: %v", status, err)
+		logger.Errorf("BUG: marshal %#v to json failed: %v", status, err)
 		return err
 	}
 
 	return worker.store.Put(layout.ServiceInstanceStatusKey(worker.serviceName, worker.instanceID), string(buff))
-}
-
-func (worker *Worker) informJavaAgent() error {
-	handleServiceSpec := func(event informer.Event, service *spec.Service) bool {
-		switch event.EventType {
-		case informer.EventDelete:
-			return false
-		case informer.EventUpdate:
-			if err := worker.observabilityManager.UpdateService(service, event.RawKV.Version); err != nil {
-				logger.Errorf("update service %s failed: %v", service.Name, err)
-			}
-		}
-
-		return true
-	}
-
-	err := worker.informer.OnPartOfServiceSpec(worker.serviceName, informer.AllParts, handleServiceSpec)
-	if err != nil && err != informer.ErrAlreadyWatched {
-		return fmt.Errorf("on informer for observability failed: %v", err)
-	}
-
-	return nil
 }
 
 // Status returns the status of worker.
@@ -392,7 +422,7 @@ func (worker *Worker) Status() *supervisor.Status {
 	}
 }
 
-// Close close the worker
+// Close closes the worker
 func (worker *Worker) Close() {
 	close(worker.done)
 

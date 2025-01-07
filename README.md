@@ -1,23 +1,32 @@
-# Easegress
+# Easegress  <!-- omit from toc -->
+
+[![Go Report Card](https://goreportcard.com/badge/github.com/megaease/easegress)](https://goreportcard.com/report/github.com/megaease/easegress)
+[![GitHub Workflow Status (branch)](https://img.shields.io/github/actions/workflow/status/megaease/easegress/test.yml?branch=main)](https://github.com/megaease/easegress/actions/workflows/test.yml)
+[![codecov](https://codecov.io/gh/megaease/easegress/branch/main/graph/badge.svg?token=5Q80B98LPI)](https://codecov.io/gh/megaease/easegress)
+[![Docker pulls](https://img.shields.io/docker/pulls/megaease/easegress.svg)](https://hub.docker.com/r/megaease/easegress)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/megaease/easegress)](https://github.com/megaease/easegress/blob/main/go.mod)
+[![Join Easegress Slack](https://img.shields.io/badge/slack-megaease-brightgreen?logo=slack)](https://cloud-native.slack.com/messages/easegress)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/8265/badge)](https://www.bestpractices.dev/projects/8265)
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Feasegress-io%2Feasegress.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Feasegress-io%2Feasegress?ref=badge_shield)
 
 <a href="https://megaease.com/easegress">
-    <img src="./doc/easegress.svg"
+    <img src="./docs/imgs/easegress.svg"
         alt="Easegress logo" title="Easegress" height="175" width="175" align="right"/>
 </a>
 
-- [Easegress](#easegress)
-  - [What is Easegress](#what-is-easegress)
-  - [Features](#features)
-  - [User Cases](#user-cases)
-  - [Getting Started](#getting-started)
-    - [Setting up Easegress](#setting-up-easegress)
-    - [Create an HTTPServer and Pipeline](#create-an-httpserver-and-pipeline)
-    - [Test](#test)
-    - [More Filters](#more-filters)
-  - [Documentation](#documentation)
-  - [Roadmap](#roadmap)
-  - [Community](#community)
-  - [License](#license)
+- [What is Easegress](#what-is-easegress)
+- [Features](#features)
+- [Getting Started](#getting-started)
+  - [Launch Easegress](#launch-easegress)
+  - [Reverse Proxy](#reverse-proxy)
+- [Use Cases](#use-cases)
+- [Documentation](#documentation)
+- [Easegress Portal](#easegress-portal)
+  - [Screenshots](#screenshots)
+- [Community](#community)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## What is Easegress
 
@@ -32,302 +41,183 @@
 
 The architecture of Easegress:
 
-![architecture](./doc/architecture.png)
+![architecture](./docs/imgs/architecture.png)
 
 ## Features
 
 - **Service Management**
-	- **Multiple protocols:**
-		- HTTP/1.1
-		- HTTP/2
-		- HTTP/3(QUIC)
-		- MQTT(coming soon)
-	- **Rich Routing Rules:** exact path, path prefix, regular expression of the path, method, headers.
-	- **Resilience&Fault Tolerance**
-		- **Circuit breaker:** temporarily blocks possible failures.
-		- **Rate limiter:** limits the rate of incoming requests.
-		- **Retryer:** repeats failed executions.
-		- **Time limiter:** limits the duration of execution.
-	- **Deployment Management**
-		- **Blue-green Strategy:** switches traffic at one time.
-		- **Canary Strategy:** schedules traffic slightly.
-	- **API Management**
-		- **API Aggregation:** aggregates results of multiple APIs.
-		- **API Orchestration:** orchestrates the flow of APIs.
-	- **Security**
-		- **IP Filter:** Limits access to IP addresses.
-		- **Static HTTPS:** static certificate files.
-		- **API Signature:** supports [HMAC](https://en.wikipedia.org/wiki/HMAC) verification.
-		- **JWT Verification:** verifies [JWT Token](https://jwt.io/).
-		- **OAuth2:** validates [OAuth/2](https://datatracker.ietf.org/doc/html/rfc6749) requests.
-		- **Let's Encrypt:** automatically manage certificate files.
-	- **Pipeline-Filter Mechanism**
-		- **Chain of Responsibility Pattern:** orchestrates filters chain.
-		- **Filter Management:** makes it easy to develop new filters.
-	- **Service Mesh**
-		- **Mesh Master:** is the control plane to manage the lifecycle of mesh services.
-		- **Mesh Sidecar:** is the data plane as the endpoint to do traffic interception and routing.
-		- **Mesh Ingress Controller:** is the mesh-specific ingress controller to route external traffic to mesh services.
-		  > Notes: This feature is leveraged by [EaseMesh](https://github.com/megaease/easemesh)
-	- **Third-Part Integration**
-		- **FaaS** integrates with the serverless platform Knative.
-		- **Service Discovery** integrates with Eureka, Consul, Etcd, and Zookeeper.
-		- **Ingress Controller** integrates with Kubernetes as an ingress controller.
+  - **Multiple protocols:**
+    - HTTP/1.1
+    - HTTP/2
+    - HTTP/3(QUIC)
+    - MQTT
+  - **Rich Routing Rules:** exact path, path prefix, regular expression of the path, method, headers, clientIPs.
+  - **Resilience&Fault Tolerance**
+    - **CircuitBreaker:** temporarily blocks possible failures.
+    - **RateLimiter:** limits the rate of incoming requests.
+    - **Retry:** repeats failed executions.
+    - **TimeLimiter:** limits the duration of execution.
+  - **Deployment Management**
+    - **Blue-green Strategy:** switches traffic at one time.
+    - **Canary Strategy:** schedules traffic slightly.
+  - **API Management**
+    - **API Aggregation:** aggregates results of multiple APIs.
+    - **API Orchestration:** orchestrates the flow of APIs.
+  - **Security**
+    - **IP Filter:** Limits access to IP addresses.
+    - **Static HTTPS:** static certificate files.
+    - **API Signature:** supports [HMAC](https://en.wikipedia.org/wiki/HMAC) verification.
+    - **JWT Verification:** verifies [JWT Token](https://jwt.io/).
+    - **OAuth2:** validates [OAuth/2](https://datatracker.ietf.org/doc/html/rfc6749) requests.
+    - **Let's Encrypt:** automatically manage certificate files.
+  - **Pipeline-Filter Mechanism**
+    - **Filter Management:** makes it easy to develop new filters.
+  - **Service Mesh**
+    - **Mesh Master:** is the control plane to manage the lifecycle of mesh services.
+    - **Mesh Sidecar:** is the data plane as the endpoint to do traffic interception and routing.
+    - **Mesh Ingress Controller:** is the mesh-specific ingress controller to route external traffic to mesh services.
+        > Notes: This feature is leveraged by [EaseMesh](https://github.com/megaease/easemesh)
+  - **Third-Part Integration**
+    - **FaaS** integrates with the serverless platform Knative.
+    - **Service Discovery** integrates with Eureka, Consul, Etcd, and Zookeeper.
+    - **Ingress Controller** integrates with Kubernetes as an ingress controller.
 - **Extensibility**
-    - **WebAssembly** executes user developed [WebAssembly](https://webassembly.org/) code.
+  - **WebAssembly** executes user developed [WebAssembly](https://webassembly.org/) code.
 - **High Performance and Availability**
-	- **Adaption**: adapts request, response in the handling chain.
-	- **Validation**: headers validation, OAuth2, JWT, and HMAC verification.
-	- **Load Balance:** round-robin, random, weighted random, ip hash, header hash.
-	- **Cache:** for the backend servers.
-	- **Compression:** compresses body for the response.
-	- **Hot-Update:** updates both config and binary of Easegress in place without losing connections.
+  - **Adaption**: adapts request, response in the handling chain.
+  - **Validation**: headers validation, OAuth2, JWT, and HMAC verification.
+  - **Load Balance:** round-robin, random, weighted random, IP hash, header hash and support sticky sessions.
+  - **Cache:** for the backend servers.
+  - **Compression:** compresses body for the response.
+  - **Hot-Update:** updates both config and binary of Easegress in place without losing connections.
 - **Operation**
-	- **Easy to Integrate:** command line(`egctl`), MegaEase Portal, HTTP clients such as curl, postman, etc.
-	- **Distributed Tracing**
-		- Built-in [Open Zipkin](https://zipkin.io/)
-		- [Open Tracing](https://opentracing.io/) for vendor-neutral APIs
-	- **Observability**
-		- **Node:** role(leader, writer, reader), health or not, last heartbeat time, and so on
-		- **Traffic:** in multi-dimension: server and backend.
-			- **Throughput:** total and error statistics of request count, TPS/m1, m5, m15, and error percent, etc.
-			- **Latency:** p25, p50, p75, p95, 98, p99, p999.
-			- **Data Size:** request and response size.
-			- **Status Codes:** HTTP status codes.
-			- **TopN:** sorted by aggregated APIs(only in server dimension).
+  - **Easy to Integrate:** command line([egctl](docs/02.Tutorials/2.1.egctl-Usage.md)), Easegress Portal, HTTP clients such as curl, postman, etc.
+  - **Distributed Tracing**
+    - Built-in [OpenTelemetry](https://opentelemetry.io/), which provides a vendor-neutral API.
+  - **Observability**
+    - **Node:** role(primary, secondary), raft leader status, healthy or not, last heartbeat time, and so on
+    - **Traffic:** in multi-dimension: server and backend.
+      - **Throughput:** total and error statistics of request count, TPS/m1, m5, m15, and error percent, etc.
+      - **Latency:** p25, p50, p75, p95, p98, p99, p999.
+      - **Data Size:** request and response size.
+      - **Status Codes:** HTTP status codes.
+      - **TopN:** sorted by aggregated APIs(only in server dimension).
+
+## Getting Started
+The basic usage of Easegress is to quickly set up a proxy for the backend servers.
+
+### Launch Easegress
+
+Easegress can be installed from pre-built binaries or from source. For details, see [Install](docs/01.Getting-Started/1.2.Install.md).
 
 
-## User Cases
+Then we can execute the server:
+
+```bash
+$ easegress-server
+2023-09-06T15:12:49.256+08:00   INFO    cluster/config.go:110   config: advertise-client-urls: ...
+...
+```
+
+By default, Easegress opens ports 2379, 2380, and 2381; however, you can modify these settings along with other arguments either in the configuration file or via command-line arguments. For a complete list of arguments, please refer to the `easegress-server --help` command.
+
+After launching successfully, we could check the status of the one-node cluster.
+
+```bash
+$ egctl get member
+...
+
+$ egctl describe member
+...
+```
+
+### Reverse Proxy
+
+Assuming you have two backend HTTP services running at `127.0.0.1:9095` and `127.0.0.1:9096`, you can initiate an HTTP proxy from port 10080 to these backends using the following command:
+
+```bash
+$ egctl create httpproxy demo --port 10080 \
+  --rule="/pipeline=http://127.0.0.1:9095,http://127.0.0.1:9096"
+```
+
+Then try it:
+```bash
+$ curl -v 127.0.0.1:10080/pipeline
+```
+
+The request will be forwarded to either `127.0.0.1:9095/pipeline` or `127.0.0.1:9096/pipeline`, utilizing a round-robin load-balancing policy.
+
+More about getting started with Easegress:
+
+- [Quick Start](docs/01.Getting-Started/1.1.Quick-Start.md)
+- [Install Easegress](docs/01.Getting-Started/1.2.Install.md)
+- [Main Concepts](docs/01.Getting-Started/1.3.Concepts.md)
+
+## Use Cases
 
 The following examples show how to use Easegress for different scenarios.
 
-- [API Aggregator](./doc/cookbook/api_aggregator.md) - Aggregating many APIs into a single API.
-- [FaaS](./doc/cookbook/faas.md) - Supporting Knative FaaS integration
-- [Flash Sale](./doc/cookbook/flash_sale.md) - How to do high concurrent promotion sales with Easegress
-- [LoadBalancer](./doc/cookbook/load_balancer.md) - A number of strategy of load balancing 
-- [Distributed Tracing](./doc/cookbook/distributed_tracing.md) - How to do APM tracing  - Zipkin.
-- [Kubernetes Ingress Controller](./doc/cookbook/k8s_ingress_controller.md) - How to integrated with Kubernetes as ingress controller
-- [Performance](./doc/cookbook/performance.md) - Performance optimization - compression, caching etc.
-- [Pipeline](./doc/cookbook/pipeline.md) - How to orchestrate HTTP filters for requests/responses handling
-- [Resilience and Fault Tolerance](./doc/cookbook/resilience.md) - Circuit Breaker, Rate Lmiter, Retryer, Time limiter, etc. (Porting from [Java resilience4j](https://github.com/resilience4j/resilience4j))
-- [Security](./doc/cookbook/security.md) - How to do authenication by Header, JWT, HMAC, OAuth2, etc.
-- [Service Proxy](./doc/cookbook/service_proxy.md) - Supporting the Microservice  registries - Zookeeper, Eureka, Consul, Nacos, etc.
-- [WebAssembly](./doc/cookbook/wasm.md) - Using AssemblyScript to extend the Easegress
-- [Workflow](./doc/cookbook/workflow.md) - An Example to make a workflow for a number of APIs.
+- [API Aggregation](docs/02.Tutorials/2.3.Pipeline-Explained.md#api-aggregation) - Aggregating many APIs into a single API.
+- [Cluster Deployment](docs/05.Administration/5.1.Config-and-Cluster-Deployment.md) - How to deploy multiple Easegress cluster nodes.
+- [Canary Release](docs/03.Advanced-Cookbook/3.04.Canary-Release.md) - How to do canary release with Easegress.
+- [Distributed Tracing](docs/03.Advanced-Cookbook/3.05.Distributed-Tracing.md) - How to do APM tracing  - Zipkin.
+- [FaaS](docs/03.Advanced-Cookbook/3.09.FaaS.md) - Supporting Knative FaaS integration
+- [Flash Sale](docs/03.Advanced-Cookbook/3.09.FaaS.md) - How to do high concurrent promotion sales with Easegress
+- [Kubernetes Ingress Controller](docs/04.Cloud-Native/4.1.Kubernetes-Ingress-Controller.md) - How to integrate with Kubernetes as ingress controller
+- [LoadBalancer](docs/02.Tutorials/2.3.Pipeline-Explained.md#load-balancer) - A number of the strategies of load balancing
+- [MQTTProxy](docs/03.Advanced-Cookbook/3.01.MQTT-Proxy.md) - An Example to MQTT proxy with Kafka backend.
+- [Multiple API Orchestration](docs/03.Advanced-Cookbook/3.03.Multiple-API-Orchestration.md) - An Telegram translation bot.
+- [Performance](docs/03.Advanced-Cookbook/3.11.Performance.md) - Performance optimization - compression, caching etc.
+- [Pipeline](docs/02.Tutorials/2.3.Pipeline-Explained.md) - How to orchestrate HTTP filters for requests/responses handling
+- [Resilience and Fault Tolerance](docs/02.Tutorials/2.4.Resilience.md) - CircuitBreaker, RateLimiter, Retry, TimeLimiter, etc. (Porting from [Java resilience4j](https://github.com/resilience4j/resilience4j))
+- [Security](docs/02.Tutorials/2.5.Traffic-Verification.md) - How to do authentication by Header, JWT, HMAC, OAuth2, etc.
+- [Service Registry](docs/03.Advanced-Cookbook/3.06.Service-Registry.md) - Supporting the Microservice registries - Zookeeper, Eureka, Consul, Nacos, etc.
+- [WebAssembly](docs/03.Advanced-Cookbook/3.07.WasmHost.md) - Using AssemblyScript to extend the Easegress
+- [WebSocket](docs/02.Tutorials/2.6.Websocket.md) - WebSocket proxy for Easegress
+- [Workflow](docs/03.Advanced-Cookbook/3.10.Workflow.md) - An Example to make a workflow for a number of APIs.
 
-For full list, see [Cookbook](./doc/cookbook/README.md).
-
-## Getting Started
-
-The basic common usage of Easegress is to quickly set up proxy for the backend servers. We split it into multiple simple steps to illustrate the essential concepts and operations.
-
-### Setting up Easegress
-
-We can download the binary from [release page](https://github.com/megaease/easegress/releases). For example we use linux version:
-
-```bash
-$ mkdir easegress
-$ wget https://github.com/megaease/easegress/releases/download/v1.1.0/easegress-v1.1.0-linux-amd64.tar.gz
-$ tar zxvf easegress-v1.1.0-linux-amd64.tar.gz -C easegress && cd easegress
-```
-
-or use source code:
-
-```bash
-$ git clone https://github.com/megaease/easegress && cd easegress
-$ make
-```
-
-Then we can add the binary directory to the `PATH` and execute the server:
-
-```bash
-$ export PATH=${PATH}:$(pwd)/bin/
-$ easegress-server
-2021-05-17T16:45:38.185+08:00	INFO	cluster/config.go:84	etcd config: init-cluster:eg-default-name=http://localhost:2380 cluster-state:new force-new-cluster:false
-2021-05-17T16:45:38.185+08:00	INFO	cluster/cluster.go:379	client is ready
-2021-05-17T16:45:39.189+08:00	INFO	cluster/cluster.go:590	server is ready
-2021-05-17T16:45:39.21+08:00	INFO	cluster/cluster.go:451	lease is ready
-2021-05-17T16:45:39.231+08:00	INFO	cluster/cluster.go:187	cluster is ready
-2021-05-17T16:45:39.253+08:00	INFO	supervisor/supervisor.go:180	create system controller StatusSyncController
-2021-05-17T16:45:39.253+08:00	INFO	cluster/cluster.go:496	session is ready
-2021-05-17T16:45:39.253+08:00	INFO	api/api.go:96	api server running in localhost:2381
-2021-05-17T16:45:44.235+08:00	INFO	cluster/member.go:210	self ID changed from 0 to 689e371e88f78b6a
-2021-05-17T16:45:44.236+08:00	INFO	cluster/member.go:137	store clusterMembers: eg-default-name(689e371e88f78b6a)=http://localhost:2380
-2021-05-17T16:45:44.236+08:00	INFO	cluster/member.go:138	store knownMembers  : eg-default-name(689e371e88f78b6a)=http://localhost:2380
-```
-
-The default target of Makefile is to compile two binary into the directory `bin/`. `bin/easegress-server` is the server-side binary, `bin/egctl` is the client-side binary. We could add it to the `$PATH` for simplifying the following commands.
-
-We could run `easegress-server` without specifying any arguments, which launch itself by opening default ports 2379, 2380, 2381. Of course, we can change them in the config file or command arguments that are explained well in `easegress-server --help`.
-
-```bash
-$ egctl member list
-- options:
-    name: eg-default-name
-    labels: {}
-    cluster-name: eg-cluster-default-name
-    cluster-role: writer
-    cluster-request-timeout: 10s
-    cluster-listen-client-urls:
-    - http://127.0.0.1:2379
-    cluster-listen-peer-urls:
-    - http://127.0.0.1:2380
-    cluster-advertise-client-urls:
-    - http://127.0.0.1:2379
-    cluster-initial-advertise-peer-urls:
-    - http://127.0.0.1:2380
-    cluster-join-urls: []
-    api-addr: localhost:2381
-    debug: false
-    home-dir: ./
-    data-dir: data
-    wal-dir: ""
-    log-dir: log
-    member-dir: member
-    cpu-profile-file: ""
-    memory-profile-file: ""
-  lastHeartbeatTime: "2021-05-05T15:43:27+08:00"
-  etcd:
-    id: a30c34bf7ec77546
-    startTime: "2021-05-05T15:42:37+08:00"
-    state: Leader
-```
-
-After launched successfully, we could check the status of the one-node cluster. It shows the static options and dynamic status of heartbeat and etcd.
-
-### Create an HTTPServer and Pipeline
-
-Now let's create an HTTPServer listening on port 10080 to handle the HTTP traffic.
-
-```bash
-$ echo '
-kind: HTTPServer
-name: server-demo
-port: 10080
-keepAlive: true
-https: false
-rules:
-  - paths:
-    - pathPrefix: /pipeline
-      backend: pipeline-demo' | egctl object create
-```
-
-The rules of routers above mean that it will lead the traffic with the prefix `/pipeline` to the pipeline `pipeline-demo`, which will be created below. If we `curl` it before created, it will return 503.
-
-```bash
-$ echo '
-name: pipeline-demo
-kind: HTTPPipeline
-flow:
-  - filter: proxy
-filters:
-  - name: proxy
-    kind: Proxy
-    mainPool:
-      servers:
-      - url: http://127.0.0.1:9095
-      - url: http://127.0.0.1:9096
-      - url: http://127.0.0.1:9097
-      loadBalance:
-        policy: roundRobin' | egctl object create
-```
-
-The pipeline means it will do proxy for 3 backend endpoints in load balance policy `roundRobin`.
-
-### Test
-
-Now you can use some HTTP clients such as `curl` to test the feature:
-
-```bash
-$ curl -v http://127.0.0.1:10080/pipeline
-```
-
-If you are not set up some applications to handle the 9095, 9096, and 9097 in the localhost, it will return 503 too. We prepare a simple service to let us test handily, the example shows:
-
-```bash
-$ go run example/backend-service/mirror/mirror.go & # Running in background
-$ curl http://127.0.0.1:10080/pipeline -d 'Hello, Easegress'
-Your Request
-===============
-Method: POST
-URL   : /pipeline
-Header: map[Accept:[*/*] Accept-Encoding:[gzip] Content-Type:[application/x-www-form-urlencoded] User-Agent:[curl/7.64.1]]
-Body  : Hello, Easegress
-```
-
-### More Filters
-
-Now we want to add more features to the pipeline, then we could add kinds of filters to the pipeline. For example, we want validation and request adaptation for the `pipeline-demo`.
-
-
-<p align="center">
-  <img src="./doc/pipeline-demo.png" width=240>
-</p>
-
-
-```bash
-$ cat pipeline-demo.yaml
-name: pipeline-demo
-kind: HTTPPipeline
-flow:
-  - filter: validator
-    jumpIf: { invalid: END }
-  - filter: requestAdaptor
-  - filter: proxy
-filters:
-  - name: validator
-    kind: Validator
-    headers:
-      Content-Type:
-        values:
-        - application/json
-  - name: requestAdaptor
-    kind: RequestAdaptor
-    header:
-      set:
-        X-Adapt-Key: goodplan
-  - name: proxy
-    kind: Proxy
-    mainPool:
-      servers:
-      - url: http://127.0.0.1:9095
-      - url: http://127.0.0.1:9096
-      - url: http://127.0.0.1:9097
-      loadBalance:
-        policy: roundRobin
-
-$ egctl object update -f pipeline-demo.yaml
-```
-
-After updating the pipeline, the original `curl -v http://127.0.0.1:10080/pipeline ` will get 400 because of the validating. So we changed it to satisfy the limitation:
-
-```bash
-$ curl http://127.0.0.1:10080/pipeline -H 'Content-Type: application/json' -d '{"message": "Hello, Easegress"}'
-Your Request
-===============
-Method: POST
-URL   : /pipeline
-Header: map[Accept:[*/*] Accept-Encoding:[gzip] Content-Type:[application/json] User-Agent:[curl/7.64.1] X-Adapt-Key:[goodplan]]
-Body  : {"message": "Hello, Easegress"}
-```
-
-We can also see Easegress send one more header `X-Adapt-Key: goodplan` to the mirror service.
-
-
+For full list, see [Tutorials](docs/02.Tutorials/README.md) and [Cookbook](docs/03.Advanced-Cookbook/README.md).
 ## Documentation
 
-See [reference](./doc/reference.md) and [developer guide](./doc/developer-guide.md) for more information.
+- [Getting Started](docs/01.Getting-Started/README.md)
+- [Tutorials](docs/02.Tutorials/README.md)
+- [Advanced Cookbook](docs/03.Advanced-Cookbook/README.md)
+- [Cloud Native](docs/04.Cloud-Native/README.md)
+- [Administration](docs/05.Administration/README.md)
+- [Development](docs/06.Development-for-Easegress/README.md)
+- [Reference](docs/07.Reference/README.md)
 
-## Roadmap
+## Easegress Portal
 
-See [Easegress Roadmap](./doc/Roadmap.md) for details.
+[Easegress Portal](https://github.com/megaease/easegress-portal) is an intuitive, open-source user interface for the Easegress traffic orchestration system. Developed with React.js, this portal provides config management, metrics, and visualizations, enhancing the overall Easegress experience.
+
+### Screenshots
+
+**1. Cluster Management**
+
+![cluster](./docs/imgs/portal/cluster.png)
+
+**2. Traffic Management**
+
+![traffic http server](./docs/imgs/portal/traffic-http-server.png)
+
+**3. Pipeline Management**
+
+![pipeline detail](./docs/imgs/portal/pipeline-detail.png)
+
 
 ## Community
 
-- [Slack Channel](https://openmegaease.slack.com/archives/C028Z6SUCU9) for requirement, issue and development.
+- [Join Slack Workspace](https://cloud-native.slack.com/messages/easegress) for requirement, issue and development.
 - [MegaEase on Twitter](https://twitter.com/megaease)
 
+## Contributing
+
+See [Contributing guide](./CONTRIBUTING.md#contributing). The project welcomes contributions and suggestions that abide by the [CNCF Code of Conduct](./CODE_OF_CONDUCT.md).
 
 ## License
 
 Easegress is under the Apache 2.0 license. See the [LICENSE](./LICENSE) file for details.
+
+
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Feasegress-io%2Feasegress.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Feasegress-io%2Feasegress?ref=badge_large)

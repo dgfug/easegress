@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,11 +15,14 @@
  * limitations under the License.
  */
 
+// Package urlclusteranalyzer provides url cluster analyzer.
 package urlclusteranalyzer
 
 import (
 	"strings"
 	"sync"
+
+	lru "github.com/hashicorp/golang-lru"
 )
 
 const (
@@ -29,16 +32,17 @@ const (
 
 // URLClusterAnalyzer is url cluster analyzer.
 type URLClusterAnalyzer struct {
-	slots []*field `yaml:"slots"`
+	slots []*field
 	mutex *sync.Mutex
+	cache *lru.Cache
 }
 
 type field struct {
-	constant        string   `yaml:"constant"`
-	subFields       []*field `yaml:"subFields"`
-	variableField   *field   `yaml:"variableField"`
-	isVariableField bool     `yaml:"isVariableField"`
-	pattern         string   `yaml:"pattern"`
+	constant        string
+	subFields       []*field
+	variableField   *field
+	isVariableField bool
+	pattern         string
 }
 
 func newField(name string) *field {
@@ -55,9 +59,11 @@ func newField(name string) *field {
 
 // New creates a URLClusterAnalyzer.
 func New() *URLClusterAnalyzer {
+	cache, _ := lru.New(4098)
 	u := &URLClusterAnalyzer{
 		mutex: &sync.Mutex{},
 		slots: make([]*field, maxLayers),
+		cache: cache,
 	}
 
 	for i := 0; i < maxLayers; i++ {
@@ -67,12 +73,15 @@ func New() *URLClusterAnalyzer {
 }
 
 // GetPattern extracts the pattern of a Restful url path.
-// A field of the path occurs more than 20 distinct values will be consider as a variables.
-// e.g input: /com/megaease/users/123/friends/456
+// A field of the path occurs more than 20 distinct values will be considered as a variables.
+// e.g. input: /com/megaease/users/123/friends/456
 // output: /com/megaease/users/*/friends/*
 func (u *URLClusterAnalyzer) GetPattern(urlPath string) string {
 	if urlPath == "" {
 		return ""
+	}
+	if val, ok := u.cache.Get(urlPath); ok {
+		return val.(string)
 	}
 
 	var values []string
@@ -131,6 +140,8 @@ LOOP:
 		currPattern = newF.pattern
 		currField = newF
 	}
+
+	u.cache.Add(urlPath, currPattern)
 
 	return currPattern
 }

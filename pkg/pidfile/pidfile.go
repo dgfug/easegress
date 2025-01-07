@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,17 +15,17 @@
  * limitations under the License.
  */
 
+// Package pidfile provides pidfile related functions.
 package pidfile
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strconv"
 
-	"github.com/megaease/easegress/pkg/logger"
-	"github.com/megaease/easegress/pkg/option"
+	"github.com/megaease/easegress/v2/pkg/logger"
+	"github.com/megaease/easegress/v2/pkg/option"
 )
 
 const (
@@ -38,9 +38,9 @@ var pidfilePath string
 func Write(opt *option.Options) error {
 	pidfilePath = filepath.Join(opt.AbsHomeDir, pidfileName)
 
-	err := ioutil.WriteFile(pidfilePath, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644)
+	err := os.WriteFile(pidfilePath, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644)
 	if err != nil {
-		logger.Errorf("write %s failed: %s", err)
+		logger.Errorf("write %s failed: %s", pidfilePath, err)
 		return err
 	}
 
@@ -51,9 +51,9 @@ func Write(opt *option.Options) error {
 func Read(opt *option.Options) (int, error) {
 	pidfilePath = filepath.Join(opt.AbsHomeDir, pidfileName)
 
-	data, err := ioutil.ReadFile(pidfilePath)
+	data, err := os.ReadFile(pidfilePath)
 	if err != nil {
-		logger.Errorf("write %s failed: %s", err)
+		logger.Errorf("read %s failed: %s", pidfilePath, err)
 		return 0, err
 	}
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,102 +19,84 @@ package httpserver
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"fmt"
-	"regexp"
 
-	"github.com/megaease/easegress/pkg/tracing"
-	"github.com/megaease/easegress/pkg/util/ipfilter"
+	"github.com/megaease/easegress/v2/pkg/object/autocertmanager"
+	"github.com/megaease/easegress/v2/pkg/object/httpserver/routers"
+	"github.com/megaease/easegress/v2/pkg/tracing"
+	"github.com/megaease/easegress/v2/pkg/util/ipfilter"
 )
 
 type (
 	// Spec describes the HTTPServer.
 	Spec struct {
-		HTTP3            bool          `yaml:"http3" jsonschema:"omitempty"`
-		Port             uint16        `yaml:"port" jsonschema:"required,minimum=1"`
-		KeepAlive        bool          `yaml:"keepAlive" jsonschema:"required"`
-		KeepAliveTimeout string        `yaml:"keepAliveTimeout" jsonschema:"omitempty,format=duration"`
-		MaxConnections   uint32        `yaml:"maxConnections" jsonschema:"omitempty,minimum=1"`
-		HTTPS            bool          `yaml:"https" jsonschema:"required"`
-		CacheSize        uint32        `yaml:"cacheSize" jsonschema:"omitempty"`
-		XForwardedFor    bool          `yaml:"xForwardedFor" jsonschema:"omitempty"`
-		Tracing          *tracing.Spec `yaml:"tracing" jsonschema:"omitempty"`
+		HTTP3             bool          `json:"http3,omitempty"`
+		KeepAlive         bool          `json:"keepAlive" jsonschema:"required"`
+		HTTPS             bool          `json:"https" jsonschema:"required"`
+		AutoCert          bool          `json:"autoCert,omitempty"`
+		XForwardedFor     bool          `json:"xForwardedFor,omitempty"`
+		Address           string        `json:"address,omitempty"`
+		Port              uint16        `json:"port" jsonschema:"required,minimum=1"`
+		ClientMaxBodySize int64         `json:"clientMaxBodySize,omitempty"`
+		KeepAliveTimeout  string        `json:"keepAliveTimeout,omitempty" jsonschema:"format=duration"`
+		MaxConnections    uint32        `json:"maxConnections,omitempty" jsonschema:"minimum=1"`
+		CacheSize         uint32        `json:"cacheSize,omitempty"`
+		Tracing           *tracing.Spec `json:"tracing,omitempty"`
+		CaCertBase64      string        `json:"caCertBase64,omitempty" jsonschema:"format=base64"`
 
 		// Support multiple certs, preserve the certbase64 and keybase64
 		// for backward compatibility
-		CertBase64 string `yaml:"certBase64" jsonschema:"omitempty,format=base64"`
-		KeyBase64  string `yaml:"keyBase64" jsonschema:"omitempty,format=base64"`
+		CertBase64 string `json:"certBase64,omitempty" jsonschema:"format=base64"`
+		KeyBase64  string `json:"keyBase64,omitempty" jsonschema:"format=base64"`
 
 		// Certs saved as map, key is domain name, value is cert
-		Certs map[string]string `yaml:"certs" jsonschema:"omitempty"`
+		Certs map[string]string `json:"certs,omitempty"`
 		// Keys saved as map, key is domain name, value is secret
-		Keys map[string]string `yaml:"keys" jsonschema:"omitempty"`
+		Keys map[string]string `json:"keys,omitempty"`
 
-		IPFilter *ipfilter.Spec `yaml:"ipFilter,omitempty" jsonschema:"omitempty"`
-		Rules    []*Rule        `yaml:"rules" jsonschema:"omitempty"`
-	}
+		RouterKind string `json:"routerKind,omitempty" jsonschema:"enum=,enum=Ordered,enum=RadixTree"`
 
-	// Rule is first level entry of router.
-	Rule struct {
-		// NOTICE: If the field is a pointer, it must have `omitempty` in tag `yaml`
-		// when it has `omitempty` in tag `jsonschema`.
-		// Otherwise it will output null value, which is invalid in json schema (the type is object).
-		// the original reason is the jsonscheme(genjs) has not support multiple types.
-		// Reference: https://github.com/alecthomas/jsonschema/issues/30
-		// In the future if we have the scenario where we need marshal the field, but omitempty
-		// in the schema, we are suppose to support multuple types on our own.
-		IPFilter   *ipfilter.Spec `yaml:"ipFilter,omitempty" jsonschema:"omitempty"`
-		Host       string         `yaml:"host" jsonschema:"omitempty"`
-		HostRegexp string         `yaml:"hostRegexp" jsonschema:"omitempty,format=regexp"`
-		Paths      []*Path        `yaml:"paths" jsonschema:"omitempty"`
-	}
+		IPFilter *ipfilter.Spec `json:"ipFilter,omitempty"`
+		Rules    routers.Rules  `json:"rules,omitempty"`
 
-	// Path is second level entry of router.
-	Path struct {
-		IPFilter      *ipfilter.Spec `yaml:"ipFilter,omitempty" jsonschema:"omitempty"`
-		Path          string         `yaml:"path,omitempty" jsonschema:"omitempty,pattern=^/"`
-		PathPrefix    string         `yaml:"pathPrefix,omitempty" jsonschema:"omitempty,pattern=^/"`
-		PathRegexp    string         `yaml:"pathRegexp,omitempty" jsonschema:"omitempty,format=regexp"`
-		RewriteTarget string         `yaml:"rewriteTarget" jsonschema:"omitempty"`
-		Methods       []string       `yaml:"methods,omitempty" jsonschema:"omitempty,uniqueItems=true,format=httpmethod-array"`
-		Backend       string         `yaml:"backend" jsonschema:"required"`
-		Headers       []*Header      `yaml:"headers" jsonschema:"omitempty"`
-	}
+		GlobalFilter string `json:"globalFilter,omitempty"`
 
-	// Header is the third level entry of router. A header entry is always under a specific path entry, that is to mean
-	// the headers entry will only be checked after a path entry matched. However, the headers entry has a higher priority
-	// than the path entry itself.
-	Header struct {
-		Key     string   `yaml:"key" jsonschema:"required"`
-		Values  []string `yaml:"values,omitempty" jsonschema:"omitempty,uniqueItems=true"`
-		Regexp  string   `yaml:"regexp,omitempty" jsonschema:"omitempty,format=regexp"`
-		Backend string   `yaml:"backend" jsonschema:"required"`
-
-		headerRE *regexp.Regexp
+		AccessLogFormat string `json:"accessLogFormat,omitempty"`
 	}
 )
 
 // Validate validates HTTPServerSpec.
 func (spec *Spec) Validate() error {
-	if spec.HTTP3 && !spec.HTTPS {
-		return fmt.Errorf("https is disabled when http3 enabled")
+	if !spec.HTTPS {
+		if spec.HTTP3 {
+			return fmt.Errorf("https is disabled when http3 enabled")
+		}
+		return nil
 	}
 
-	if spec.HTTPS {
-		if spec.CertBase64 == "" && spec.KeyBase64 == "" && len(spec.Certs) == 0 && len(spec.Keys) == 0 {
-			return fmt.Errorf("certBase64/keyBase64, certs/keys are both empty when https enabled")
-		}
-		_, err := spec.tlsConfig()
-		if err != nil {
-			return err
-		}
+	if spec.CertBase64 == "" && spec.KeyBase64 == "" && len(spec.Certs) == 0 && len(spec.Keys) == 0 && !spec.AutoCert {
+		return fmt.Errorf("certBase64/keyBase64, certs/keys are both empty and autocert is disabled when https enabled")
 	}
+	_, err := spec.tlsConfig()
+	return err
+}
 
-	return nil
+func tryDecodeBase64Pem(pem string) []byte {
+	// The pem could in base64 encoding or plain text. It starts with '-' if it is
+	// in plain text, and '-' is not a valid character in standard base64 encoding.
+	// We first try to decode it as base64, and fallback to plain text if failed.
+	d, err := base64.StdEncoding.DecodeString(pem)
+	if err == nil {
+		return d
+	}
+	return []byte(pem)
 }
 
 func (spec *Spec) tlsConfig() (*tls.Config, error) {
 	var certificates []tls.Certificate
+
 	if spec.CertBase64 != "" && spec.KeyBase64 != "" {
 		// Prefer add CertBase64 and KeyBase64
 		certPem, _ := base64.StdEncoding.DecodeString(spec.CertBase64)
@@ -127,33 +109,56 @@ func (spec *Spec) tlsConfig() (*tls.Config, error) {
 	}
 
 	for k, v := range spec.Certs {
-		if secret, exists := spec.Keys[k]; exists {
-			cert, err := tls.X509KeyPair([]byte(v), []byte(secret))
-			if err != nil {
-				return nil, fmt.Errorf("generate x509 key pair for %s failed: %s ", k, err)
-			}
-			certificates = append(certificates, cert)
-		} else {
+		secret, exists := spec.Keys[k]
+		if !exists {
 			return nil, fmt.Errorf("certs %s hasn't secret corresponded to it", k)
 		}
+
+		certPem := tryDecodeBase64Pem(v)
+		keyPem := tryDecodeBase64Pem(secret)
+		cert, err := tls.X509KeyPair(certPem, keyPem)
+		if err != nil {
+			return nil, fmt.Errorf("generate x509 key pair for %s failed: %s ", k, err)
+		}
+		certificates = append(certificates, cert)
 	}
 
-	if len(certificates) == 0 {
+	if len(certificates) == 0 && !spec.AutoCert {
 		return nil, fmt.Errorf("none valid certs and secret")
 	}
 
-	return &tls.Config{Certificates: certificates}, nil
-}
-
-func (h *Header) initHeaderRoute() {
-	h.headerRE = regexp.MustCompile(h.Regexp)
-}
-
-// Validate validates Header.
-func (h *Header) Validate() error {
-	if len(h.Values) == 0 && h.Regexp == "" {
-		return fmt.Errorf("both of values and regexp are empty for key: %s", h.Key)
+	// TLS-ALPN-01 challenges requires HTTP server to listen on port 443, but we don't
+	// know which HTTP server listen on this port (consider there's an nginx sitting in
+	// front of Easegress), so all HTTP servers need to handle TLS-ALPN-01 challenges.
+	// But for HTTP servers who have disabled AutoCert, it should only handle the
+	// TLS-ALPN-01 token certificate request.
+	tlsConf := &tls.Config{
+		Certificates: certificates,
+		NextProtos:   []string{"acme-tls/1"},
 	}
 
-	return nil
+	if spec.AutoCert {
+		tlsConf.GetCertificate = func(chi *tls.ClientHelloInfo) (*tls.Certificate, error) {
+			// NOTE: Need to get the latest.
+			acm, exists := autocertmanager.GetGlobalAutoCertManager()
+			if !exists {
+				return nil, fmt.Errorf("there is no AutoCertManager")
+			}
+
+			return acm.GetCertificate(chi, !spec.AutoCert /* tokenOnly */)
+		}
+	}
+
+	// if caCertBase64 configuration is provided, should enable tls.ClientAuth and
+	// add the root cert
+	if len(spec.CaCertBase64) != 0 {
+		rootCertPem, _ := base64.StdEncoding.DecodeString(spec.CaCertBase64)
+		certPool := x509.NewCertPool()
+		certPool.AppendCertsFromPEM(rootCertPem)
+
+		tlsConf.ClientAuth = tls.RequireAndVerifyClientCert
+		tlsConf.ClientCAs = certPool
+	}
+
+	return tlsConf, nil
 }

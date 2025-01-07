@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 
+// Package circuitbreaker implements the circuit breaker logic.
 package circuitbreaker
 
 import (
@@ -309,7 +310,8 @@ var stateStrings = []string{
 // NewPolicy create and initialize a policy
 func NewPolicy(failureRateThreshold, slowCallRateThreshold, slidingWindowType uint8,
 	slidingWindowSize, permittedNumberOfCallsInHalfOpen, minimumNumberOfCalls uint32,
-	slowCallDurationThreshold, maxWaitDurationInHalfOpen, waitDurationInOpen time.Duration) *Policy {
+	slowCallDurationThreshold, maxWaitDurationInHalfOpen, waitDurationInOpen time.Duration,
+) *Policy {
 	return &Policy{
 		FailureRateThreshold:             failureRateThreshold,
 		SlowCallRateThreshold:            slowCallRateThreshold,

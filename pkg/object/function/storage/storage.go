@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 
+// Package storage provides the storage for FaaS.
 package storage
 
 import (
@@ -23,8 +24,8 @@ import (
 
 	"go.etcd.io/etcd/api/v3/mvccpb"
 
-	"github.com/megaease/easegress/pkg/cluster"
-	"github.com/megaease/easegress/pkg/logger"
+	"github.com/megaease/easegress/v2/pkg/cluster"
+	"github.com/megaease/easegress/v2/pkg/logger"
 )
 
 const (
@@ -53,7 +54,7 @@ type (
 		Delete(key string) error
 		DeletePrefix(prefix string) error
 
-		Syncer() (*cluster.Syncer, error)
+		Syncer() (cluster.Syncer, error)
 	}
 
 	clusterStorage struct {
@@ -152,7 +153,7 @@ func (cs *clusterStorage) GetRawPrefix(prefix string) (map[string]*mvccpb.KeyVal
 	return cs.cls.GetRawPrefix(prefix)
 }
 
-func (cs *clusterStorage) Syncer() (*cluster.Syncer, error) {
+func (cs *clusterStorage) Syncer() (cluster.Syncer, error) {
 	return cs.cls.Syncer(time.Minute)
 }
 

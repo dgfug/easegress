@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,14 +19,19 @@ package api
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
-	"github.com/megaease/easegress/pkg/cluster"
-	"github.com/megaease/easegress/pkg/logger"
-	"github.com/megaease/easegress/pkg/option"
-	"github.com/megaease/easegress/pkg/supervisor"
+	"github.com/megaease/easegress/v2/pkg/cluster"
+	"github.com/megaease/easegress/v2/pkg/cluster/customdata"
+	"github.com/megaease/easegress/v2/pkg/logger"
+	"github.com/megaease/easegress/v2/pkg/option"
+	pprof "github.com/megaease/easegress/v2/pkg/profile"
+	"github.com/megaease/easegress/v2/pkg/supervisor"
 )
 
 type (
@@ -37,6 +42,8 @@ type (
 		router  *dynamicMux
 		cluster cluster.Cluster
 		super   *supervisor.Supervisor
+		cds     *customdata.Store
+		profile pprof.Profile
 
 		mutex      cluster.Mutex
 		mutexMutex sync.Mutex
@@ -50,33 +57,61 @@ type (
 
 	// Entry is the entry of API.
 	Entry struct {
-		Path    string           `yaml:"path"`
-		Method  string           `yaml:"method"`
-		Handler http.HandlerFunc `yaml:"-"`
+		Path    string           `json:"path"`
+		Method  string           `json:"method"`
+		Handler http.HandlerFunc `json:"-"`
 	}
 )
 
 // MustNewServer creates an api server.
-func MustNewServer(opt *option.Options, cluster cluster.Cluster, super *supervisor.Supervisor) *Server {
+func MustNewServer(opt *option.Options, cls cluster.Cluster, super *supervisor.Supervisor, profile pprof.Profile) *Server {
 	s := &Server{
 		opt:     opt,
-		cluster: cluster,
+		cluster: cls,
 		super:   super,
+		profile: profile,
 	}
 	s.router = newDynamicMux(s)
 	s.server = http.Server{Addr: opt.APIAddr, Handler: s.router}
+
+	if opt.ClientCAFile != "" {
+		caCert, err := os.ReadFile(opt.ClientCAFile)
+		if err != nil {
+			logger.Errorf("read client CA file %s failed: %v", opt.ClientCAFile, err)
+		}
+		caCertPool := x509.NewCertPool()
+		if ok := caCertPool.AppendCertsFromPEM(caCert); !ok {
+			logger.Errorf("Failed to append CA certificate to pool")
+		}
+		s.server.TLSConfig = &tls.Config{
+			ClientAuth: tls.RequireAndVerifyClientCert,
+			ClientCAs:  caCertPool,
+		}
+	}
 
 	_, err := s.getMutex()
 	if err != nil {
 		logger.Errorf("get cluster mutex %s failed: %v", lockKey, err)
 	}
 
-	s.initMetadata()
+	kindPrefix := cls.Layout().CustomDataKindPrefix()
+	dataPrefix := cls.Layout().CustomDataPrefix()
+	s.cds = customdata.NewStore(cls, kindPrefix, dataPrefix)
+
 	s.registerAPIs()
 
 	go func() {
-		logger.Infof("api server running in %s", opt.APIAddr)
-		s.server.ListenAndServe()
+		var err error
+		if s.opt.TLS {
+			logger.Infof("api server (https) running in %s", opt.APIAddr)
+			err = s.server.ListenAndServeTLS(s.opt.CertFile, s.opt.KeyFile)
+		} else {
+			logger.Infof("api server running in %s", opt.APIAddr)
+			err = s.server.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
+			logger.Errorf("start api server failed: %v", err)
+		}
 	}()
 
 	return s

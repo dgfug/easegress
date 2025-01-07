@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 
+// Package profile provides profile related functions.
 package profile
 
 import (
@@ -25,18 +26,35 @@ import (
 	"runtime/pprof"
 	"sync"
 
-	"github.com/megaease/easegress/pkg/logger"
-	"github.com/megaease/easegress/pkg/option"
+	"github.com/megaease/easegress/v2/pkg/logger"
+	"github.com/megaease/easegress/v2/pkg/option"
 )
 
 // Profile is the Profile interface.
 type Profile interface {
+	StartCPUProfile(fp string) error
+
+	UpdateCPUProfile(fp string) error
+	UpdateMemoryProfile(fp string)
+
+	StopCPUProfile()
+	StopMemoryProfile(fp string)
+
+	CPUFileName() string
+	MemoryFileName() string
+
 	Close(wg *sync.WaitGroup)
+	Lock()
+	Unlock()
 }
 
 type profile struct {
-	cpuFile *os.File
-	opt     *option.Options
+	opt         *option.Options
+	cpuFile     *os.File
+	cpuFileName string
+	memFileName string
+
+	mutex sync.Mutex
 }
 
 // New creates a profile.
@@ -45,7 +63,7 @@ func New(opt *option.Options) (Profile, error) {
 		opt: opt,
 	}
 
-	err := p.startCPUProfile()
+	err := p.StartCPUProfile("")
 	if err != nil {
 		return nil, err
 	}
@@ -53,12 +71,30 @@ func New(opt *option.Options) (Profile, error) {
 	return p, nil
 }
 
-func (p *profile) startCPUProfile() error {
-	if p.opt.CPUProfileFile == "" {
+func (p *profile) CPUFileName() string {
+	if p.cpuFile == nil {
+		return p.cpuFileName
+	}
+	return p.cpuFile.Name()
+}
+
+func (p *profile) MemoryFileName() string {
+	return p.memFileName
+}
+
+func (p *profile) UpdateMemoryProfile(fp string) {
+	p.memFileName = fp
+}
+
+func (p *profile) StartCPUProfile(filepath string) error {
+	if p.opt.CPUProfileFile == "" && filepath == "" {
 		return nil
 	}
+	if filepath == "" {
+		filepath = p.opt.CPUProfileFile
+	}
 
-	f, err := os.Create(p.opt.CPUProfileFile)
+	f, err := os.Create(filepath)
 	if err != nil {
 		return fmt.Errorf("create cpu profile failed: %v", err)
 	}
@@ -68,22 +104,26 @@ func (p *profile) startCPUProfile() error {
 	}
 
 	p.cpuFile = f
+	p.cpuFileName = f.Name()
 
-	logger.Infof("cpu profile: %s", p.opt.CPUProfileFile)
+	logger.Infof("cpu profile: %s", filepath)
 
 	return nil
 }
 
-func (p *profile) memoryProfile() {
-	if p.opt.MemoryProfileFile == "" {
+func (p *profile) StopMemoryProfile(filepath string) {
+	if p.opt.MemoryProfileFile == "" && filepath == "" {
 		return
+	}
+	if filepath == "" {
+		filepath = p.opt.MemoryProfileFile
 	}
 
 	// to include every allocated block in the profile
 	runtime.MemProfileRate = 1
 
-	logger.Infof("memory profile: %s", p.opt.MemoryProfileFile)
-	f, err := os.Create(p.opt.MemoryProfileFile)
+	logger.Infof("memory profile: %s", filepath)
+	f, err := os.Create(filepath)
 	if err != nil {
 		logger.Errorf("create memory profile failed: %v", err)
 		return
@@ -102,16 +142,33 @@ func (p *profile) memoryProfile() {
 	}
 }
 
-func (p *profile) Close(wg *sync.WaitGroup) {
-	defer wg.Done()
-
+func (p *profile) StopCPUProfile() {
 	if p.cpuFile != nil {
+		fname := p.cpuFile.Name()
 		pprof.StopCPUProfile()
 		err := p.cpuFile.Close()
 		if err != nil {
-			logger.Errorf("close %s failed: %v", p.opt.CPUProfileFile, err)
+			logger.Errorf("close %s failed: %v", fname, err)
 		}
+		p.cpuFile = nil
 	}
+}
 
-	p.memoryProfile()
+func (p *profile) UpdateCPUProfile(filepath string) error {
+	p.StopCPUProfile()
+	return p.StartCPUProfile(filepath)
+}
+
+func (p *profile) Close(wg *sync.WaitGroup) {
+	defer wg.Done()
+	p.StopCPUProfile()
+	p.StopMemoryProfile("")
+}
+
+func (p *profile) Lock() {
+	p.mutex.Lock()
+}
+
+func (p *profile) Unlock() {
+	p.mutex.Unlock()
 }

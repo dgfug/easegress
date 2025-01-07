@@ -1,12 +1,12 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://wwwrk.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,16 +18,16 @@
 package worker
 
 import (
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/megaease/easegress/pkg/api"
-	"github.com/megaease/easegress/pkg/logger"
-	"github.com/megaease/easegress/pkg/object/meshcontroller/registrycenter"
+	"github.com/megaease/easegress/v2/pkg/api"
+	"github.com/megaease/easegress/v2/pkg/logger"
+	"github.com/megaease/easegress/v2/pkg/object/meshcontroller/registrycenter"
+	"github.com/megaease/easegress/v2/pkg/util/codectool"
 )
 
 func (worker *Worker) consulAPIs() []*apiEntry {
@@ -73,7 +73,7 @@ func (worker *Worker) consulAPIs() []*apiEntry {
 }
 
 func (worker *Worker) consulRegister(w http.ResponseWriter, r *http.Request) {
-	body, err := ioutil.ReadAll(r.Body)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		api.HandleAPIError(w, r, http.StatusBadRequest,
 			fmt.Errorf("read body failed: %v", err))
@@ -114,15 +114,8 @@ func (worker *Worker) healthService(w http.ResponseWriter, r *http.Request) {
 
 	serviceEntry := worker.registryServer.ToConsulHealthService(serviceInfo)
 
-	buff, err := json.Marshal(serviceEntry)
-	if err != nil {
-		logger.Errorf("json marshal sericeEntry: %#v err: %v", serviceEntry, err)
-		api.HandleAPIError(w, r, http.StatusInternalServerError, err)
-		return
-	}
-
-	w.Header().Set("Content-Type", registrycenter.ContentTypeJSON)
-	w.Write(buff)
+	buff := codectool.MustMarshalJSON(serviceEntry)
+	worker.writeJSONBody(w, buff)
 }
 
 func (worker *Worker) catalogService(w http.ResponseWriter, r *http.Request) {
@@ -144,15 +137,8 @@ func (worker *Worker) catalogService(w http.ResponseWriter, r *http.Request) {
 
 	catalogService := worker.registryServer.ToConsulCatalogService(serviceInfo)
 
-	buff, err := json.Marshal(catalogService)
-	if err != nil {
-		api.HandleAPIError(w, r, http.StatusInternalServerError, err)
-		logger.Errorf("json marshal catalogService: %#v err: %v", catalogService, err)
-		return
-	}
-
-	w.Header().Set("Content-Type", registrycenter.ContentTypeJSON)
-	w.Write(buff)
+	buff := codectool.MustMarshalJSON(catalogService)
+	worker.writeJSONBody(w, buff)
 }
 
 func (worker *Worker) catalogServices(w http.ResponseWriter, r *http.Request) {
@@ -167,13 +153,6 @@ func (worker *Worker) catalogServices(w http.ResponseWriter, r *http.Request) {
 	}
 	catalogServices := worker.registryServer.ToConsulServices(serviceInfos)
 
-	buff, err := json.Marshal(catalogServices)
-	if err != nil {
-		logger.Errorf("json marshal catalogServices: %#v err: %v", catalogServices, err)
-		api.HandleAPIError(w, r, http.StatusInternalServerError, err)
-		return
-	}
-
-	w.Header().Set("Content-Type", registrycenter.ContentTypeJSON)
-	w.Write(buff)
+	buff := codectool.MustMarshalJSON(catalogServices)
+	worker.writeJSONBody(w, buff)
 }

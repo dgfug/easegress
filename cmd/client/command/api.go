@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 
+// Package command provides the commands.
 package command
 
 import (
@@ -27,7 +28,7 @@ import (
 func APICmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "api",
-		Short: "View Easegress APIs",
+		Short: "(Deprecated) View Easegress APIs",
 	}
 
 	cmd.AddCommand(listAPICmd())
@@ -39,7 +40,7 @@ func listAPICmd() *cobra.Command {
 		Use:   "list",
 		Short: "List Easegress APIs",
 		Run: func(cmd *cobra.Command, args []string) {
-			handleRequest(http.MethodGet, makeURL(apiURL), nil, cmd)
+			handleRequest(http.MethodGet, makePath(apiURL), nil, cmd)
 		},
 	}
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, MegaEase
+ * Copyright (c) 2017, The Easegress Authors
  * All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -51,6 +51,7 @@ func (rcs *Server) ToConsulHealthService(serviceInfo *ServiceRegistryInfo) []*ap
 		Address: serviceInfo.Ins.IP,
 		Service: serviceInfo.Ins.ServiceName,
 	}
+	svc.Checks = make(api.HealthChecks, 0)
 	svcs = append(svcs, &svc)
 	return svcs
 }
